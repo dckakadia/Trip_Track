@@ -289,3 +289,18 @@ button[type="submit"], #sync-button {
 }
 
 .form-error:empty { display: none; }
+
+.supplier-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+button.map-link {
+  font-family: inherit;
+  background: #fff;
+  cursor: pointer;
+}
+
+.map-link.danger { color: #c0392b; border-color: #e6c3bd; }
+.map-link.danger:hover { background: #fbeeec; }

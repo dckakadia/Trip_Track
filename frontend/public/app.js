@@ -304,7 +304,28 @@ function renderSupplierList() {
         .filter(Boolean)
         .join(' · ') || '—')
     );
-    header.append(left, mapLink(supplier));
+    const actions = el('div', 'supplier-actions');
+    const editButton = el('button', 'map-link', '✏️ Edit');
+    editButton.type = 'button';
+    editButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setSupplierFormMode(supplier);
+    });
+    const deleteButton = el('button', 'map-link danger', '🗑 Delete');
+    deleteButton.type = 'button';
+    deleteButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (!confirm(`Delete supplier “${supplier.name}”?`)) return;
+      try {
+        await api('DELETE', `/api/suppliers/${supplier.id}`);
+        await renderSuppliers();
+        refreshSyncStatus().catch(() => {});
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    actions.append(mapLink(supplier), editButton, deleteButton);
+    header.append(left, actions);
     item.append(header);
 
     const profile = supplierProfile(supplier);
@@ -312,6 +333,23 @@ function renderSupplierList() {
     item.append(profile);
     header.addEventListener('click', () => profile.classList.toggle('hidden'));
     list.append(item);
+  }
+}
+
+function setSupplierFormMode(supplier) {
+  const form = document.getElementById('supplier-form');
+  form.querySelector('input[name="id"]').value = supplier ? supplier.id : '';
+  document.getElementById('supplier-form-title').textContent = supplier ? `Edit ${supplier.name}` : 'New supplier';
+  document.getElementById('supplier-form-submit').textContent = supplier ? 'Save changes' : 'Add supplier';
+  document.getElementById('supplier-form-cancel').classList.toggle('hidden', !supplier);
+  if (supplier) {
+    for (const input of form.querySelectorAll('input[name]')) {
+      if (input.name !== 'id') input.value = supplier[input.name] ?? '';
+    }
+    form.classList.remove('hidden');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    form.reset();
   }
 }
 
@@ -558,6 +596,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
 
 document.querySelectorAll('.add-toggle[data-target]').forEach((button) => {
   button.addEventListener('click', () => {
+    if (button.dataset.target === 'supplier-form') setSupplierFormMode(null);
     document.getElementById(button.dataset.target).classList.toggle('hidden');
   });
 });
@@ -639,8 +678,35 @@ document.getElementById('supplier-import-file').addEventListener('change', (even
 
 bindForm('trip-form', '/api/trips', null, renderTrips);
 bindForm('city-form', '/api/cities', () => ({ trip_id: state.tripId }), renderTrips);
-bindForm('supplier-form', '/api/suppliers', null, renderSuppliers);
 bindForm('visit-form', '/api/visits', () => ({ trip_id: state.tripId }), renderSchedule);
+
+// Supplier form creates or, when an id is set via Edit, updates in place.
+document.getElementById('supplier-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.querySelector('input[name="id"]').value;
+  try {
+    if (id) {
+      const payload = {};
+      for (const input of form.querySelectorAll('input[name]')) {
+        if (input.name !== 'id') payload[input.name] = input.value || null;
+      }
+      await api('PATCH', `/api/suppliers/${id}`, payload);
+    } else {
+      await api('POST', '/api/suppliers', formValues(form));
+    }
+    setSupplierFormMode(null);
+    form.classList.add('hidden');
+    await renderSuppliers();
+    refreshSyncStatus().catch(() => {});
+  } catch (error) {
+    toast(error.message);
+  }
+});
+document.getElementById('supplier-form-cancel').addEventListener('click', () => {
+  setSupplierFormMode(null);
+  document.getElementById('supplier-form').classList.add('hidden');
+});
 
 // --- Auth ---
 

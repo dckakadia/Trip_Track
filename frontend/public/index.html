@@ -95,7 +95,8 @@
         <select id="supplier-region"><option value="">All regions</option></select>
       </div>
       <form id="supplier-form" class="card form-grid hidden">
-        <h2>New supplier</h2>
+        <h2 id="supplier-form-title">New supplier</h2>
+        <input type="hidden" name="id" />
         <input name="name" placeholder="Supplier name" required />
         <input name="name_cn" placeholder="Name (中文)" />
         <input name="contact_name" placeholder="Contact" />
@@ -109,7 +110,8 @@
         <input name="address_en" placeholder="Address (EN)" />
         <input name="address_cn" placeholder="Address (中文)" />
         <input name="map_url" type="url" placeholder="Google Maps link (paste from Share)" />
-        <button type="submit">Add supplier</button>
+        <button type="submit" id="supplier-form-submit">Add supplier</button>
+        <button type="button" id="supplier-form-cancel" class="hidden">Cancel edit</button>
       </form>
       <div id="supplier-import-card" class="card hidden">
         <h3>Import suppliers</h3>
