@@ -179,6 +179,23 @@ function setTripFormMode(trip) {
   }
 }
 
+function setCityFormMode(city) {
+  const form = document.getElementById('city-form');
+  form.querySelector('input[name="id"]').value = city ? city.id : '';
+  document.getElementById('city-form-title').textContent = city ? `Edit ${city.name}` : 'Add city';
+  document.getElementById('city-form-submit').textContent = city ? 'Save changes' : 'Add city';
+  document.getElementById('city-form-cancel').classList.toggle('hidden', !city);
+  if (city) {
+    for (const input of form.querySelectorAll('input[name]')) {
+      if (input.name !== 'id') input.value = city[input.name] ?? '';
+    }
+    form.classList.remove('hidden');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    form.reset();
+  }
+}
+
 async function renderTrips() {
   const trips = await api('GET', '/api/trips');
   if (!state.tripId && trips.length > 0) {
@@ -238,13 +255,31 @@ async function renderTrips() {
     cityList.append(el('p', 'muted', 'No cities yet — add the cities you will visit.'));
   }
   for (const city of cities) {
-    const item = el('div', 'item');
+    const item = el('div', 'item trip-item');
     const left = el('div');
     left.append(el('div', 'title', city.name_cn ? `${city.name} · ${city.name_cn}` : city.name));
     left.append(
       el('div', 'sub', [city.arrive_date && `${city.arrive_date} → ${city.depart_date || '?'}`, city.hotel_name].filter(Boolean).join(' · ') || '—')
     );
     item.append(left);
+    const right = el('div', 'trip-actions');
+    const editButton = el('button', 'map-link', '✏️ Edit');
+    editButton.type = 'button';
+    editButton.addEventListener('click', () => setCityFormMode(city));
+    const deleteButton = el('button', 'map-link danger', '🗑 Delete');
+    deleteButton.type = 'button';
+    deleteButton.addEventListener('click', async () => {
+      if (!confirm(`Delete city "${city.name}"? This does not delete its visits.`)) return;
+      try {
+        await api('DELETE', `/api/cities/${city.id}`);
+        await renderTrips();
+        refreshSyncStatus().catch(() => {});
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    right.append(editButton, deleteButton);
+    item.append(right);
     cityList.append(item);
   }
 }
@@ -646,6 +681,7 @@ document.querySelectorAll('.add-toggle[data-target]').forEach((button) => {
   button.addEventListener('click', () => {
     if (button.dataset.target === 'supplier-form') setSupplierFormMode(null);
     if (button.dataset.target === 'trip-form') setTripFormMode(null);
+    if (button.dataset.target === 'city-form') setCityFormMode(null);
     document.getElementById(button.dataset.target).classList.toggle('hidden');
   });
 });
@@ -725,7 +761,35 @@ document.getElementById('supplier-import-file').addEventListener('change', (even
   event.currentTarget.value = '';
 });
 
-bindForm('city-form', '/api/cities', () => ({ trip_id: state.tripId }), renderTrips);
+// City form creates or, when an id is set via Edit, updates in place.
+document.getElementById('city-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.querySelector('input[name="id"]').value;
+  try {
+    if (id) {
+      const payload = {};
+      for (const input of form.querySelectorAll('input[name]')) {
+        if (input.name !== 'id') {
+          payload[input.name] = input.value === '' ? null : input.name === 'sort_order' ? Number(input.value) : input.value;
+        }
+      }
+      await api('PATCH', `/api/cities/${id}`, payload);
+    } else {
+      await api('POST', '/api/cities', { ...formValues(form), trip_id: state.tripId });
+    }
+    setCityFormMode(null);
+    form.classList.add('hidden');
+    await renderTrips();
+    refreshSyncStatus().catch(() => {});
+  } catch (error) {
+    toast(error.message);
+  }
+});
+document.getElementById('city-form-cancel').addEventListener('click', () => {
+  setCityFormMode(null);
+  document.getElementById('city-form').classList.add('hidden');
+});
 
 // Trip form creates or, when an id is set via Edit, updates in place.
 document.getElementById('trip-form').addEventListener('submit', async (event) => {

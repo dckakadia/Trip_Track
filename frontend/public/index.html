@@ -151,14 +151,16 @@
           <button class="add-toggle" data-target="city-form" type="button">+ Add city</button>
         </div>
         <form id="city-form" class="card form-grid hidden">
-          <h3>Add city</h3>
+          <h3 id="city-form-title">Add city</h3>
+          <input type="hidden" name="id" />
           <input name="name" placeholder="City" required />
           <input name="name_cn" placeholder="City (中文)" />
           <input name="arrive_date" type="date" />
           <input name="depart_date" type="date" />
           <input name="hotel_name" placeholder="Hotel" />
           <input name="sort_order" type="number" placeholder="Order" />
-          <button type="submit">Add city</button>
+          <button type="submit" id="city-form-submit">Add city</button>
+          <button type="button" id="city-form-cancel" class="hidden">Cancel edit</button>
         </form>
         <div id="city-list"></div>
       </div>
