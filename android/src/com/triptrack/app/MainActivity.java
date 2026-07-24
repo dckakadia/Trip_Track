@@ -1,7 +1,10 @@
 package com.triptrack.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Bundle;
+import android.webkit.JsResult;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -41,6 +44,52 @@ public class MainActivity extends Activity {
               + "</body></html>";
           view.loadDataWithBaseURL(serverUrl, html, "text/html", "utf-8", null);
         }
+      }
+    });
+    // Without a WebChromeClient, WebView never shows window.confirm()/alert()
+    // dialogs — the call returns immediately as if cancelled. The web UI uses
+    // confirm() for delete buttons (suppliers, users), so those would silently
+    // no-op in the packaged app without this.
+    webView.setWebChromeClient(new WebChromeClient() {
+      @Override
+      public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
+        new AlertDialog.Builder(MainActivity.this)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, new android.content.DialogInterface.OnClickListener() {
+              public void onClick(android.content.DialogInterface dialog, int which) {
+                result.confirm();
+              }
+            })
+            .setNegativeButton(android.R.string.cancel, new android.content.DialogInterface.OnClickListener() {
+              public void onClick(android.content.DialogInterface dialog, int which) {
+                result.cancel();
+              }
+            })
+            .setOnCancelListener(new android.content.DialogInterface.OnCancelListener() {
+              public void onCancel(android.content.DialogInterface dialog) {
+                result.cancel();
+              }
+            })
+            .show();
+        return true;
+      }
+
+      @Override
+      public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
+        new AlertDialog.Builder(MainActivity.this)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, new android.content.DialogInterface.OnClickListener() {
+              public void onClick(android.content.DialogInterface dialog, int which) {
+                result.confirm();
+              }
+            })
+            .setOnCancelListener(new android.content.DialogInterface.OnCancelListener() {
+              public void onCancel(android.content.DialogInterface dialog) {
+                result.confirm();
+              }
+            })
+            .show();
+        return true;
       }
     });
     setContentView(webView);
