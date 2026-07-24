@@ -109,7 +109,11 @@
         <input name="region" placeholder="Region / Province" />
         <input name="address_en" placeholder="Address (EN)" />
         <input name="address_cn" placeholder="Address (中文)" />
-        <input name="map_url" type="url" placeholder="Google Maps link (paste from Share)" />
+        <div class="coords-helper">
+          <input id="supplier-coords-input" type="text" placeholder="Or paste GPS coordinates (e.g. from phone GPS, Apple Maps, WeChat, Amap) — no Google Maps needed" />
+          <button type="button" id="supplier-coords-apply" class="file-button outline">Build map link</button>
+        </div>
+        <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
         <button type="submit" id="supplier-form-submit">Add supplier</button>
         <button type="button" id="supplier-form-cancel" class="hidden">Cancel edit</button>
       </form>

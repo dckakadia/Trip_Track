@@ -76,6 +76,10 @@ main { padding: 1rem; max-width: 720px; margin: 0 auto; }
 .form-grid h2, .form-grid h3, .form-grid button[type="submit"] { grid-column: 1 / -1; }
 .form-grid input, .form-grid select { width: 100%; min-width: 0; }
 
+.coords-helper { grid-column: 1 / -1; display: flex; gap: 0.4rem; }
+.coords-helper input { flex: 1; min-width: 0; }
+.coords-helper button { flex-shrink: 0; }
+
 input, select, button {
   font: inherit;
   padding: 0.5rem 0.6rem;

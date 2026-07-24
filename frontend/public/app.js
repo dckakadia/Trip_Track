@@ -822,6 +822,40 @@ document.getElementById('trip-form-cancel').addEventListener('click', () => {
 bindForm('visit-form', '/api/visits', () => ({ trip_id: state.tripId }), renderSchedule);
 
 // Supplier form creates or, when an id is set via Edit, updates in place.
+// Builds a Google Maps link from pasted coordinates, so a supplier location can be
+// mapped from any GPS source (phone GPS, Apple Maps, WeChat share, Amap, Baidu) without
+// needing Google Maps itself to load — useful where Google Maps is blocked (e.g. mainland
+// China). Accepts "lat,lng" possibly embedded in other text (a share-sheet URL, a label).
+function parseCoordinates(text) {
+  const match = /(-?\d{1,3}\.\d{2,})\s*,\s*(-?\d{1,3}\.\d{2,})/.exec(text);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function applyCoordsHelper() {
+  const input = document.getElementById('supplier-coords-input');
+  const coords = parseCoordinates(input.value);
+  if (!coords) {
+    toast('Could not find coordinates like "31.23, 121.47" in that text');
+    return;
+  }
+  const mapUrlInput = document.querySelector('#supplier-form input[name="map_url"]');
+  mapUrlInput.value = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+  input.value = '';
+  toast('Map link built from coordinates');
+}
+document.getElementById('supplier-coords-apply').addEventListener('click', applyCoordsHelper);
+// Enter in this field should build the link, not submit the whole supplier form.
+document.getElementById('supplier-coords-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    applyCoordsHelper();
+  }
+});
+
 document.getElementById('supplier-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
