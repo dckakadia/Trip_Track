@@ -9,10 +9,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-  // 10.0.2.2 is the emulator's alias for the host machine's loopback.
-  // On a real phone, launch with:
-  //   adb shell am start -n com.triptrack.app/.MainActivity -e server_url http://<laptop-ip>:3600
-  private static final String DEFAULT_SERVER_URL = "http://10.0.2.2:3600";
+  // Default: the TripTrack server on gps-server's LAN address (phone must be
+  // on the same network). Override without rebuilding via:
+  //   adb shell am start -n com.triptrack.app/.MainActivity -e server_url http://<host>:<port>
+  // (In the emulator, use http://10.0.2.2:3600 — the host-loopback alias.)
+  private static final String DEFAULT_SERVER_URL = "http://192.168.2.103:3600";
 
   private WebView webView;
   private String serverUrl;

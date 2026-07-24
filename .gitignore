@@ -6,3 +6,4 @@ node_modules/
 *.db-shm
 android/build/
 backend/uploads/
+frontend/public/TripTrack.apk
