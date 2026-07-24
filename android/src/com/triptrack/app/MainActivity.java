@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Message;
 import android.webkit.JsResult;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -53,6 +54,10 @@ public class MainActivity extends Activity {
     WebSettings settings = webView.getSettings();
     settings.setJavaScriptEnabled(true);
     settings.setDomStorageEnabled(true);
+    // The supplier "Map" link (and anything else with target="_blank") opens a new window —
+    // WebView drops that silently unless multi-window support + onCreateWindow are wired up.
+    settings.setSupportMultipleWindows(true);
+    settings.setJavaScriptCanOpenWindowsAutomatically(true);
     webView.setWebViewClient(new WebViewClient() {
       @Override
       public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -129,6 +134,31 @@ public class MainActivity extends Activity {
           filePathCallback = null;
           return false;
         }
+        return true;
+      }
+
+      // The supplier "Map" link uses target="_blank" (rel="noopener") so tapping it doesn't
+      // navigate the app itself away to Google/Amap/Baidu Maps. WebView's default behavior
+      // for a new-window request with nothing handling it is to silently do nothing — no
+      // error, the tap just appears dead. Hand the URL off to whatever app the device has
+      // registered for it (a maps app, or the browser) instead.
+      @Override
+      public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+        WebView target = new WebView(MainActivity.this);
+        target.setWebViewClient(new WebViewClient() {
+          @Override
+          public boolean shouldOverrideUrlLoading(WebView innerView, WebResourceRequest request) {
+            try {
+              startActivity(new Intent(Intent.ACTION_VIEW, request.getUrl()));
+            } catch (ActivityNotFoundException e) {
+              // No app can handle it (e.g. no browser installed) — nothing we can do.
+            }
+            return true;
+          }
+        });
+        WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+        transport.setWebView(target);
+        resultMsg.sendToTarget();
         return true;
       }
     });
