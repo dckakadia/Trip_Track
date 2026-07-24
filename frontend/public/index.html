@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TripTrack</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>TripTrack</h1>
+    <div class="sync-area">
+      <span id="sync-status" class="sync-status">…</span>
+      <button id="sync-button" type="button">Sync now</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="today" type="button"><span class="tab-icon">☀️</span><span>Today</span></button>
+    <button class="tab" data-view="schedule" type="button"><span class="tab-icon">📅</span><span>Schedule</span></button>
+    <button class="tab" data-view="suppliers" type="button"><span class="tab-icon">🏭</span><span>Suppliers</span></button>
+    <button class="tab" data-view="trips" type="button"><span class="tab-icon">🧳</span><span>Trips</span></button>
+    <button class="tab" data-view="admin" type="button"><span class="tab-icon">⚙️</span><span>Admin</span></button>
+  </nav>
+
+  <main>
+    <!-- ===== Today ===== -->
+    <section id="view-today" class="view">
+      <h2 id="today-title" class="view-title">Today</h2>
+      <div id="today-stats" class="stat-row"></div>
+      <div class="section-head">
+        <h3>Today's visits</h3>
+        <button class="add-toggle" id="today-plan-button" type="button">Open schedule</button>
+      </div>
+      <div id="today-visits"></div>
+    </section>
+
+    <!-- ===== Schedule ===== -->
+    <section id="view-schedule" class="view hidden">
+      <p id="schedule-empty" class="muted">Select a trip on the Trips tab first.</p>
+      <div id="schedule-body" class="hidden">
+        <div class="card day-bar">
+          <button id="day-prev" type="button" aria-label="Previous day">‹</button>
+          <input id="schedule-date" type="date" />
+          <button id="day-next" type="button" aria-label="Next day">›</button>
+        </div>
+        <div class="section-head">
+          <h3 id="day-visit-count">Visits</h3>
+          <button class="add-toggle" data-target="visit-form" type="button">+ Add visit</button>
+        </div>
+        <form id="visit-form" class="card form-grid hidden">
+          <select name="supplier_id" required></select>
+          <input name="visit_date" type="date" required />
+          <input name="scheduled_time" type="time" />
+          <input name="purpose" placeholder="Purpose" />
+          <button type="submit">Add visit</button>
+        </form>
+        <div id="visit-list"></div>
+      </div>
+    </section>
+
+    <!-- ===== Suppliers ===== -->
+    <section id="view-suppliers" class="view hidden">
+      <div class="section-head">
+        <h3 id="supplier-count">Suppliers</h3>
+        <div class="head-actions">
+          <button class="add-toggle" data-target="supplier-import-card" type="button">Import</button>
+          <button class="add-toggle" data-target="supplier-form" type="button">+ New</button>
+        </div>
+      </div>
+      <div class="card search-bar">
+        <input id="supplier-search" type="search" placeholder="Search name, product, contact…" />
+        <select id="supplier-region"><option value="">All regions</option></select>
+      </div>
+      <form id="supplier-form" class="card form-grid hidden">
+        <h2>New supplier</h2>
+        <input name="name" placeholder="Supplier name" required />
+        <input name="name_cn" placeholder="Name (中文)" />
+        <input name="contact_name" placeholder="Contact" />
+        <input name="contact_mobile" placeholder="Mobile" />
+        <input name="wechat_id" placeholder="WeChat" />
+        <input name="whatsapp" placeholder="WhatsApp" />
+        <input name="email" type="email" placeholder="Email" />
+        <input name="website" placeholder="Website" />
+        <input name="product_category" placeholder="Product category" />
+        <input name="region" placeholder="Region / Province" />
+        <input name="address_en" placeholder="Address (EN)" />
+        <input name="address_cn" placeholder="Address (中文)" />
+        <input name="map_url" type="url" placeholder="Google Maps link (paste from Share)" />
+        <button type="submit">Add supplier</button>
+      </form>
+      <div id="supplier-import-card" class="card hidden">
+        <h3>Import suppliers</h3>
+        <p class="muted">Upload an Excel sheet (.xlsx) or CSV. The first row must be column headers — recognized: Name, Name CN, Contact, Mobile, WhatsApp, Email, Website, WeChat, Category, Products, Region, Address, Address CN, Map URL, Established, Employees, Export Markets, Specialty, Notes (plus Office/Landline, folded into notes). Dashes count as empty. Existing suppliers (same name) are skipped.</p>
+        <div class="admin-data-actions">
+          <label class="file-button">
+            Import from Excel
+            <input type="file" id="supplier-import-file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden />
+          </label>
+          <a class="file-button outline" href="/api/suppliers/sample-sheet" download>Download sample sheet</a>
+        </div>
+        <p id="supplier-import-result" class="muted"></p>
+      </div>
+      <div id="supplier-list"></div>
+    </section>
+
+    <!-- ===== Trips ===== -->
+    <section id="view-trips" class="view hidden">
+      <div class="section-head">
+        <h3>Trips</h3>
+        <button class="add-toggle" data-target="trip-form" type="button">+ New trip</button>
+      </div>
+      <form id="trip-form" class="card form-grid hidden">
+        <h2>New trip</h2>
+        <input name="name" placeholder="Trip name" required />
+        <input name="start_date" type="date" />
+        <input name="end_date" type="date" />
+        <input name="notes" placeholder="Notes" />
+        <button type="submit">Add trip</button>
+      </form>
+      <div id="trip-list"></div>
+      <div id="trip-detail" class="hidden">
+        <div class="section-head">
+          <h3 id="trip-detail-name"></h3>
+          <button class="add-toggle" data-target="city-form" type="button">+ Add city</button>
+        </div>
+        <form id="city-form" class="card form-grid hidden">
+          <h3>Add city</h3>
+          <input name="name" placeholder="City" required />
+          <input name="name_cn" placeholder="City (中文)" />
+          <input name="arrive_date" type="date" />
+          <input name="depart_date" type="date" />
+          <input name="hotel_name" placeholder="Hotel" />
+          <input name="sort_order" type="number" placeholder="Order" />
+          <button type="submit">Add city</button>
+        </form>
+        <div id="city-list"></div>
+      </div>
+    </section>
+
+    <!-- ===== Admin ===== -->
+    <section id="view-admin" class="view hidden">
+      <div class="section-head">
+        <h3>Users</h3>
+        <button class="add-toggle" data-target="user-form" type="button">+ New user</button>
+      </div>
+      <form id="user-form" class="card form-grid hidden">
+        <h2 id="user-form-title">New user</h2>
+        <input type="hidden" name="id" />
+        <input name="name" placeholder="Name" required />
+        <input name="email" type="email" placeholder="Email" required />
+        <select name="role">
+          <option value="MEMBER">Member</option>
+          <option value="ADMIN">Admin</option>
+        </select>
+        <select name="active">
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+        <button type="submit" id="user-form-submit">Add user</button>
+        <button type="button" id="user-form-cancel" class="hidden">Cancel edit</button>
+      </form>
+      <div id="user-list"></div>
+
+      <div class="card">
+        <h2>Data</h2>
+        <p class="muted">Export downloads everything as a JSON file. Import merges a TripTrack export into this device — newer edits win, and merged rows sync out like local changes.</p>
+        <div class="admin-data-actions">
+          <button type="button" id="export-button">Export data</button>
+          <label class="file-button">
+            Import data
+            <input type="file" id="import-file" accept="application/json,.json" hidden />
+          </label>
+        </div>
+        <p id="import-result" class="muted"></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
