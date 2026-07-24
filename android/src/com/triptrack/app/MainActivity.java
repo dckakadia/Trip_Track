@@ -9,11 +9,12 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-  // Default: the TripTrack server on gps-server's LAN address (phone must be
-  // on the same network). Override without rebuilding via:
+  // Default: the public address of the TripTrack server (router forwards 3600
+  // to gps-server), so the app works on mobile data as well as WiFi.
+  // Override without rebuilding via:
   //   adb shell am start -n com.triptrack.app/.MainActivity -e server_url http://<host>:<port>
   // (In the emulator, use http://10.0.2.2:3600 — the host-loopback alias.)
-  private static final String DEFAULT_SERVER_URL = "http://192.168.2.103:3600";
+  private static final String DEFAULT_SERVER_URL = "http://116.74.77.22:3600";
 
   private WebView webView;
   private String serverUrl;
