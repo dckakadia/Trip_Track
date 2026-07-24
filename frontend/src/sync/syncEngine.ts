@@ -31,33 +31,37 @@ export interface PullResult {
 }
 
 export async function pushPendingOps(transport: SyncTransport): Promise<PushResult> {
-  const ops = listPendingOps();
-  const db = getDatabase();
-  let pushed = 0;
+  try {
+    const ops = listPendingOps();
+    const db = getDatabase();
+    let pushed = 0;
 
-  for (const op of ops) {
-    try {
-      await transport.pushOperation(op);
-    } catch (error) {
-      // Stop at the first failure so ops reach the server in queue order.
-      return {
-        pushed,
-        remaining: ops.length - pushed,
-        error: error instanceof Error ? error.message : String(error)
-      };
+    for (const op of ops) {
+      try {
+        await transport.pushOperation(op);
+      } catch (error) {
+        // Stop at the first failure so ops reach the server in queue order.
+        return {
+          pushed,
+          remaining: ops.length - pushed,
+          error: error instanceof Error ? error.message : String(error)
+        };
+      }
+
+      removePendingOp(op.id);
+      const payload = JSON.parse(op.payload) as { updated_at?: string };
+      // Only mark synced if the row was not modified again while the push was in flight.
+      db.prepare(`UPDATE ${op.table_name} SET synced = 1 WHERE id = ? AND updated_at = ?`).run(
+        op.row_id,
+        payload.updated_at ?? ''
+      );
+      pushed += 1;
     }
 
-    removePendingOp(op.id);
-    const payload = JSON.parse(op.payload) as { updated_at?: string };
-    // Only mark synced if the row was not modified again while the push was in flight.
-    db.prepare(`UPDATE ${op.table_name} SET synced = 1 WHERE id = ? AND updated_at = ?`).run(
-      op.row_id,
-      payload.updated_at ?? ''
-    );
-    pushed += 1;
+    return { pushed, remaining: 0, error: null };
+  } catch (error) {
+    handleDbError('push pending ops', error);
   }
-
-  return { pushed, remaining: 0, error: null };
 }
 
 export async function pullRemoteChanges(transport: SyncTransport): Promise<PullResult> {
@@ -76,6 +80,17 @@ export async function pullRemoteChanges(transport: SyncTransport): Promise<PullR
       const id = remoteRow.id;
       if (typeof id !== 'string' || !id) {
         throw new Error(`Remote change is missing a row id for table ${change.table_name}`);
+      }
+
+      const validColumns = new Set(
+        (db.prepare(`PRAGMA table_info(${change.table_name})`).all() as Array<{ name: string }>).map(
+          (column) => column.name
+        )
+      );
+      for (const column of Object.keys(remoteRow)) {
+        if (!validColumns.has(column)) {
+          throw new Error(`Remote change for table ${change.table_name} has unknown column: ${column}`);
+        }
       }
 
       const local = db.prepare(`SELECT updated_at FROM ${change.table_name} WHERE id = ?`).get(id) as

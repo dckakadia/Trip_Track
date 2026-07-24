@@ -84,3 +84,14 @@ test('photo repository CRUD, parent lookup, and upload tracking', async () => {
     [earlyId, lateId, supplierPhotoId].sort()
   );
 });
+
+test('createPhoto requires parent_type, parent_id, and local_path', async () => {
+  initializeDatabase();
+  const tripId = await createTrip({ name: 'Validation Trip' });
+  const supplierId = await createSupplier({ name: 'Validation Supplier' });
+  const visitId = await createVisit({ trip_id: tripId, supplier_id: supplierId, visit_date: '2026-08-10' });
+  await assert.rejects(
+    createPhoto({ parent_type: 'visit', parent_id: visitId, local_path: '' }),
+    /parent_type, parent_id, and local_path are required/
+  );
+});

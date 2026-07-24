@@ -139,6 +139,55 @@ test('importSupplierFile dispatches by extension and rejects unknown types', asy
   await assert.rejects(() => importSupplierFile('suppliers.pdf', Buffer.from('x')), /Unsupported file type/);
 });
 
+test('parseXlsx fails safely (throws, does not crash) on malformed or adversarial input', () => {
+  assert.throws(() => parseXlsx(Buffer.from('not a zip file at all, just some random text bytes')), /Not a valid \.xlsx file/);
+  assert.throws(() => parseXlsx(Buffer.alloc(0)), /Not a valid \.xlsx file/);
+  assert.throws(() => parseXlsx(Buffer.from([0x50, 0x4b, 0x03, 0x04])), /Not a valid \.xlsx file/);
+
+  // A structurally valid EOCD whose central directory entry count doesn't match reality —
+  // must throw a normal Error, not read out of bounds and crash the process.
+  const validZip = makeZip([['xl/worksheets/sheet1.xml', '<worksheet/>']]);
+  const corruptCount = Buffer.from(validZip);
+  corruptCount.writeUInt16LE(9, corruptCount.length - 22 + 8);
+  corruptCount.writeUInt16LE(9, corruptCount.length - 22 + 10);
+  assert.throws(() => parseXlsx(corruptCount));
+
+  // A deflate-flagged entry whose "compressed" bytes are not valid deflate data.
+  const nameBuf = Buffer.from('xl/worksheets/sheet1.xml');
+  const data = Buffer.from('this is not valid raw-deflate compressed data at all!!');
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(8, 8); // method = deflate
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(nameBuf.length, 26);
+  const localRec = Buffer.concat([local, nameBuf, data]);
+  const cd = Buffer.alloc(46);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt16LE(20, 4);
+  cd.writeUInt16LE(20, 6);
+  cd.writeUInt16LE(8, 10); // method = deflate
+  cd.writeUInt32LE(data.length, 20);
+  cd.writeUInt32LE(data.length, 24);
+  cd.writeUInt16LE(nameBuf.length, 28);
+  cd.writeUInt32LE(0, 42);
+  const cdRec = Buffer.concat([cd, nameBuf]);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(cdRec.length, 12);
+  eocd.writeUInt32LE(localRec.length, 16);
+  const badDeflateZip = Buffer.concat([localRec, cdRec, eocd]);
+  assert.throws(() => parseXlsx(badDeflateZip));
+});
+
+test('importSupplierFile rejects a malformed .xlsx through the full import path without crashing', async () => {
+  initializeDatabase();
+  await assert.rejects(() => importSupplierFile('bad.xlsx', Buffer.from('garbage, not a real xlsx')));
+});
+
 test('generated sample sheet round-trips through the parser and importer', async () => {
   initializeDatabase();
   const sample = buildSampleXlsx();

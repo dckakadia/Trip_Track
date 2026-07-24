@@ -50,6 +50,43 @@ export async function createUser(input: CreateUserInput): Promise<string> {
   }
 }
 
+/**
+ * Create the very first ADMIN account. The "nobody can log in yet" check and
+ * the insert happen back-to-back with no `await` between them, so the whole
+ * check-then-insert runs as one uninterrupted synchronous block — Node's
+ * single-threaded event loop can't interleave a second concurrent setup
+ * request in between, so only one of two racing setup calls can ever win.
+ */
+export async function createFirstAdminUser(input: {
+  name: string;
+  email: string;
+  password_hash: string;
+}): Promise<string> {
+  try {
+    if (!input.name || !input.email) {
+      throw new Error('Name and email are required');
+    }
+    assertEmailAvailable(input.email);
+
+    const db = getDatabase();
+    const existing = db
+      .prepare('SELECT COUNT(*) AS count FROM users WHERE deleted = 0 AND active = 1 AND password_hash IS NOT NULL')
+      .get() as { count: number };
+    if (existing.count > 0) {
+      throw new Error('Setup has already been completed');
+    }
+
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO users (id, name, email, role, active, password_hash, updated_at, deleted, synced) VALUES (?, ?, ?, 'ADMIN', 1, ?, ?, 0, 0)`
+    ).run(id, input.name, input.email, input.password_hash, nowIso());
+    queueRowUpsert('users', id);
+    return id;
+  } catch (error) {
+    handleDbError('create first admin user', error);
+  }
+}
+
 export async function getUserById(id: string): Promise<UserRecord | null> {
   try {
     const row = getDatabase().prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRecord | undefined;
@@ -106,7 +143,7 @@ export async function updateUser(
       assertEmailAvailable(updates.email, id);
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('users', updates);
     getDatabase().prepare(`UPDATE users SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getUserById(id);
     if (!updated) {

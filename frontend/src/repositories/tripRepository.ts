@@ -6,6 +6,9 @@ import { queueRowUpsert } from '../sync/pendingOps.ts';
 
 export async function createTrip(input: { name: string; start_date?: string | null; end_date?: string | null; notes?: string | null }): Promise<string> {
   try {
+    if (!input.name) {
+      throw new Error('Name is required');
+    }
     const db = getDatabase();
     const id = randomUUID();
     const updated_at = nowIso();
@@ -55,7 +58,7 @@ export async function updateTrip(id: string, updates: Partial<Pick<TripRecord, '
       throw new Error('Trip not found');
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('trips', updates);
     db.prepare(`UPDATE trips SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getTripById(id);
     if (!updated) {

@@ -21,6 +21,9 @@ export interface CreateSampleInput {
 
 export async function createSample(input: CreateSampleInput): Promise<string> {
   try {
+    if (!input.visit_id) {
+      throw new Error('visit_id is required');
+    }
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
@@ -89,7 +92,7 @@ export async function updateSample(
       throw new Error('Sample not found');
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('samples', updates);
     db.prepare(`UPDATE samples SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getSampleById(id);
     if (!updated) {

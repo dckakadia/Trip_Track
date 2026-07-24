@@ -229,6 +229,12 @@ export const SCHEMA_STATEMENTS = [
     key TEXT PRIMARY KEY,
     value TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS login_attempts (
+    identifier TEXT PRIMARY KEY,
+    failed_count INTEGER DEFAULT 0,
+    locked_until TEXT,
+    last_attempt_at TEXT
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_visits_visit_date ON visits (visit_date)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_trip_id ON visits (trip_id)`,
   `CREATE INDEX IF NOT EXISTS idx_samples_visit_id ON samples (visit_id)`,

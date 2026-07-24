@@ -62,3 +62,8 @@ test('supplier repository CRUD with city lookup and sync flags', async () => {
     [supplierId]
   );
 });
+
+test('createSupplier requires a name', async () => {
+  initializeDatabase();
+  await assert.rejects(createSupplier({ name: '' }), /Name is required/);
+});

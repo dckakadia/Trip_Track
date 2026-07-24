@@ -52,3 +52,10 @@ test('city repository CRUD with sort ordering and sync flags', async () => {
     [guangzhouId]
   );
 });
+
+test('createCity requires trip_id and name', async () => {
+  initializeDatabase();
+  const tripId = await createTrip({ name: 'Validation Trip' });
+  await assert.rejects(createCity({ trip_id: tripId, name: '' }), /trip_id and name are required/);
+  await assert.rejects(createCity({ trip_id: '', name: 'No Trip' }), /trip_id and name are required/);
+});

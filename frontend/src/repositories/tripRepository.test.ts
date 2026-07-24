@@ -28,3 +28,24 @@ test('trip repository sets updated_at and synced flags correctly', async () => {
   assert.equal(deleted.deleted, 1);
   assert.equal(deleted.synced, 0);
 });
+
+test('updateTrip rejects an unrecognized/malicious column key instead of interpolating it into SQL', async () => {
+  initializeDatabase();
+  const tripId = await createTrip({ name: 'Injection Target' });
+
+  // TypeScript's Partial<Pick<...>> only allows real columns; a JSON request body has no such
+  // guarantee at runtime, so simulate an attacker-controlled PATCH body with `as any`.
+  await assert.rejects(
+    updateTrip(tripId, { "name = 'x'; DROP TABLE trips; --": 'malicious' } as any),
+    /unknown column/
+  );
+
+  const stillThere = await getTripById(tripId);
+  assert.equal(stillThere?.name, 'Injection Target');
+});
+
+test('createTrip requires a name', async () => {
+  initializeDatabase();
+  await assert.rejects(createTrip({ name: '' }), /Name is required/);
+  await assert.rejects(createTrip({} as any), /Name is required/);
+});

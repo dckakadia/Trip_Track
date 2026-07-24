@@ -17,6 +17,9 @@ export interface CreateCityInput {
 
 export async function createCity(input: CreateCityInput): Promise<string> {
   try {
+    if (!input.trip_id || !input.name) {
+      throw new Error('trip_id and name are required');
+    }
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
@@ -71,7 +74,7 @@ export async function updateCity(
       throw new Error('City not found');
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('cities', updates);
     db.prepare(`UPDATE cities SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getCityById(id);
     if (!updated) {

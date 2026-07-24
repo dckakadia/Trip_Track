@@ -11,8 +11,9 @@ OUT=build
 rm -rf "$OUT"
 mkdir -p "$OUT/obj"
 
-# 1. Link resources + manifest into a base APK.
-"$BT/aapt2" link -o "$OUT/app.unaligned.apk" -I "$PLATFORM" --manifest AndroidManifest.xml
+# 1. Compile res/ (e.g. the network security config) and link it + the manifest into a base APK.
+"$BT/aapt2" compile --dir res -o "$OUT/res.zip"
+"$BT/aapt2" link -o "$OUT/app.unaligned.apk" -I "$PLATFORM" --manifest AndroidManifest.xml -R "$OUT/res.zip"
 
 # 2. Compile Java against the Android platform.
 javac -source 8 -target 8 -bootclasspath "$PLATFORM" -classpath "$PLATFORM" -nowarn \

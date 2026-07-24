@@ -29,6 +29,9 @@ export interface CreateSupplierInput {
 
 export async function createSupplier(input: CreateSupplierInput): Promise<string> {
   try {
+    if (!input.name) {
+      throw new Error('Name is required');
+    }
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
@@ -105,7 +108,7 @@ export async function updateSupplier(
       throw new Error('Supplier not found');
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('suppliers', updates);
     db.prepare(`UPDATE suppliers SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getSupplierById(id);
     if (!updated) {

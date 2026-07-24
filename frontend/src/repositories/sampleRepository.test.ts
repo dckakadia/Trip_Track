@@ -68,3 +68,8 @@ test('sample repository CRUD, defaults, and follow-up listing', async () => {
     [sampleId]
   );
 });
+
+test('createSample requires a visit_id', async () => {
+  initializeDatabase();
+  await assert.rejects(createSample({ visit_id: '' }), /visit_id is required/);
+});

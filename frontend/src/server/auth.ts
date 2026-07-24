@@ -78,10 +78,17 @@ export function parseCookies(header: string | undefined): Record<string, string>
   return cookies;
 }
 
+// Set TRIPTRACK_COOKIE_SECURE=1 when Nginx (or another proxy) terminates TLS in front of
+// the app server, so the session cookie is never sent over plain HTTP. Left off by default
+// so local HTTP development still works.
+function secureAttribute(): string {
+  return process.env.TRIPTRACK_COOKIE_SECURE === '1' ? '; Secure' : '';
+}
+
 export function sessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secureAttribute()}`;
 }
 
 export function clearedSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureAttribute()}`;
 }

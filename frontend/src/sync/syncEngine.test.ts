@@ -146,3 +146,28 @@ test('newer remote row overwrites older local row on pull', async () => {
   const count = db.prepare('SELECT COUNT(*) AS n FROM trips WHERE id = ?').get(tripId) as { n: number };
   assert.equal(count.n, 1);
 });
+
+test('pull rejects a remote row with an unrecognized/malicious column name', async () => {
+  initializeDatabase();
+  const { transport } = makeTransport({
+    pullResult: [
+      {
+        table_name: 'trips',
+        row: {
+          id: randomUUID(),
+          name: 'Injected Row',
+          updated_at: new Date().toISOString(),
+          // Not a real column on `trips` — must be rejected, not interpolated into SQL.
+          "id); DROP TABLE trips; --": 'malicious'
+        }
+      }
+    ]
+  });
+
+  await assert.rejects(pullRemoteChanges(transport), /unknown column/);
+
+  // The table must still exist and be queryable, and the malicious row must not be inserted.
+  const db2 = getDatabase();
+  const rows = db2.prepare('SELECT id FROM trips WHERE name = ?').all('Injected Row');
+  assert.equal(rows.length, 0);
+});

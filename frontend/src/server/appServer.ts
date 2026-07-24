@@ -30,6 +30,7 @@ import {
 import { listPhotosByParent } from '../repositories/photoRepository.ts';
 import {
   countCredentialedUsers,
+  createFirstAdminUser,
   createUser,
   getUserByEmail,
   getUserById,
@@ -37,6 +38,7 @@ import {
   softDeleteUser,
   updateUser
 } from '../repositories/userRepository.ts';
+import { checkLoginThrottle, clearLoginFailures, recordLoginFailure } from '../repositories/loginAttemptRepository.ts';
 import {
   MIN_PASSWORD_LENGTH,
   SESSION_COOKIE,
@@ -57,6 +59,8 @@ import { createHttpSyncTransport } from '../sync/httpSyncTransport.ts';
 import { createHttpPhotoUploadTransport, uploadPendingPhotos } from '../sync/photoUploader.ts';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../../public/', import.meta.url));
+
+let syncInProgress = false;
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -142,18 +146,19 @@ async function handleAuthApi(req: IncomingMessage, res: ServerResponse, url: URL
     return true;
   }
   if (pathname === '/api/auth/setup' && method === 'POST') {
-    if ((await countCredentialedUsers()) > 0) {
+    const body = await readJsonBody(req);
+    const password = assertPassword(body.password);
+    let id: string;
+    try {
+      id = await createFirstAdminUser({
+        name: String(body.name ?? ''),
+        email: String(body.email ?? ''),
+        password_hash: hashPassword(password)
+      });
+    } catch {
       sendJson(res, 403, { error: 'Already set up — sign in instead' });
       return true;
     }
-    const body = await readJsonBody(req);
-    const password = assertPassword(body.password);
-    const id = await createUser({
-      name: String(body.name ?? ''),
-      email: String(body.email ?? ''),
-      role: 'ADMIN',
-      password_hash: hashPassword(password)
-    });
     const user = await getUserById(id);
     res.setHeader('set-cookie', sessionCookie(await createSessionToken(id)));
     sendJson(res, 201, { user: user ? publicUser(user) : null });
@@ -161,11 +166,23 @@ async function handleAuthApi(req: IncomingMessage, res: ServerResponse, url: URL
   }
   if (pathname === '/api/auth/login' && method === 'POST') {
     const body = await readJsonBody(req);
-    const user = await getUserByEmail(String(body.email ?? ''));
+    const email = String(body.email ?? '');
+    const throttle = await checkLoginThrottle(email);
+    if (!throttle.allowed) {
+      res.setHeader('retry-after', String(throttle.retryAfterSeconds));
+      sendJson(res, 429, {
+        error: 'Too many failed login attempts. Try again later.',
+        retry_after_seconds: throttle.retryAfterSeconds
+      });
+      return true;
+    }
+    const user = await getUserByEmail(email);
     if (!user || !user.active || !verifyPassword(String(body.password ?? ''), user.password_hash)) {
+      await recordLoginFailure(email);
       sendJson(res, 401, { error: 'Invalid email or password' });
       return true;
     }
+    await clearLoginFailures(email);
     res.setHeader('set-cookie', sessionCookie(await createSessionToken(user.id)));
     sendJson(res, 200, { user: publicUser(user) });
     return true;
@@ -384,9 +401,21 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
       sendJson(res, 400, { error: 'TRIPTRACK_SYNC_URL is not configured' });
       return true;
     }
-    const sync = await runSync(createHttpSyncTransport(syncUrl));
-    const photos = await uploadPendingPhotos(createHttpPhotoUploadTransport(syncUrl));
-    sendJson(res, 200, { ...sync, photos, pending: countPendingOps() });
+    // Two overlapping runs would both read the same pending-ops snapshot and push it twice;
+    // pushes/pulls are idempotent so nothing corrupts, but reject the second one outright
+    // rather than doing duplicate network work.
+    if (syncInProgress) {
+      sendJson(res, 409, { error: 'A sync is already in progress' });
+      return true;
+    }
+    syncInProgress = true;
+    try {
+      const sync = await runSync(createHttpSyncTransport(syncUrl));
+      const photos = await uploadPendingPhotos(createHttpPhotoUploadTransport(syncUrl));
+      sendJson(res, 200, { ...sync, photos, pending: countPendingOps() });
+    } finally {
+      syncInProgress = false;
+    }
     return true;
   }
 
@@ -394,8 +423,11 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   try {
+    // Parsing must happen inside the try: a request with an empty Host header (a client can
+    // send `Host: ` with no value) makes `new URL()` throw — outside a try/catch that becomes
+    // an unhandled rejection that takes the whole process down, not just this one request.
+    const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`);
     if (url.pathname.startsWith('/api/')) {
       if (await handleAuthApi(req, res, url)) {
         return;

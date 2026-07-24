@@ -19,6 +19,9 @@ const VALID_STATUSES: VisitStatus[] = ['PLANNED', 'CONFIRMED', 'DONE', 'CANCELLE
 
 export async function createVisit(input: CreateVisitInput): Promise<string> {
   try {
+    if (!input.trip_id || !input.supplier_id || !input.visit_date) {
+      throw new Error('trip_id, supplier_id, and visit_date are required');
+    }
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
@@ -83,7 +86,7 @@ export async function updateVisit(
       throw new Error('Visit not found');
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('visits', updates);
     db.prepare(`UPDATE visits SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getVisitById(id);
     if (!updated) {

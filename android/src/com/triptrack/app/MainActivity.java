@@ -2,8 +2,12 @@ package com.triptrack.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.JsResult;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -17,16 +21,33 @@ public class MainActivity extends Activity {
   // Override without rebuilding via:
   //   adb shell am start -n com.triptrack.app/.MainActivity -e server_url http://<host>:<port>
   // (In the emulator, use http://10.0.2.2:3600 — the host-loopback alias.)
+  // Only http(s) URLs are accepted — MainActivity is exported (required for the
+  // launcher icon to work), so any other installed app can start it with an
+  // arbitrary `server_url` extra; restricting the scheme blocks file:// / content:// /
+  // javascript: etc. from being loaded, though a malicious app can still point this at
+  // an attacker-run http(s) host to phish the login form (there's no JS bridge exposed
+  // to that page, so the blast radius stops at whatever the user types into it).
   private static final String DEFAULT_SERVER_URL = "http://116.74.77.22:3600";
+  private static final int FILE_CHOOSER_REQUEST_CODE = 51426;
 
   private WebView webView;
   private String serverUrl;
+  private ValueCallback<Uri[]> filePathCallback;
+
+  private static boolean isHttpUrl(String url) {
+    if (url == null) {
+      return false;
+    }
+    Uri uri = Uri.parse(url);
+    String scheme = uri.getScheme();
+    return ("http".equals(scheme) || "https".equals(scheme)) && uri.getHost() != null;
+  }
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     String fromIntent = getIntent().getStringExtra("server_url");
-    serverUrl = fromIntent != null ? fromIntent : DEFAULT_SERVER_URL;
+    serverUrl = isHttpUrl(fromIntent) ? fromIntent : DEFAULT_SERVER_URL;
 
     webView = new WebView(this);
     WebSettings settings = webView.getSettings();
@@ -91,9 +112,40 @@ public class MainActivity extends Activity {
             .show();
         return true;
       }
+
+      // Without this, WebView's <input type="file"> (used by the supplier/data import
+      // pickers) never opens a chooser — the tap is silently swallowed, exactly like
+      // confirm()/alert() were before WebChromeClient was added for those.
+      @Override
+      public boolean onShowFileChooser(
+          WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+        if (filePathCallback != null) {
+          filePathCallback.onReceiveValue(null);
+        }
+        filePathCallback = callback;
+        try {
+          startActivityForResult(params.createIntent(), FILE_CHOOSER_REQUEST_CODE);
+        } catch (ActivityNotFoundException e) {
+          filePathCallback = null;
+          return false;
+        }
+        return true;
+      }
     });
     setContentView(webView);
     webView.loadUrl(serverUrl);
+  }
+
+  @Override
+  protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
+      if (filePathCallback != null) {
+        filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+        filePathCallback = null;
+      }
+      return;
+    }
+    super.onActivityResult(requestCode, resultCode, data);
   }
 
   @Override

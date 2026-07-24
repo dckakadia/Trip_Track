@@ -77,3 +77,17 @@ test('visit repository CRUD, day schedule ordering, and status transitions', asy
     [morningId, afternoonId]
   );
 });
+
+test('createVisit requires trip_id, supplier_id, and visit_date', async () => {
+  initializeDatabase();
+  const tripId = await createTrip({ name: 'Validation Trip' });
+  const supplierId = await createSupplier({ name: 'Validation Supplier' });
+  await assert.rejects(
+    createVisit({ trip_id: tripId, supplier_id: supplierId, visit_date: '' }),
+    /trip_id, supplier_id, and visit_date are required/
+  );
+  await assert.rejects(
+    createVisit({ trip_id: '', supplier_id: supplierId, visit_date: '2026-08-10' }),
+    /trip_id, supplier_id, and visit_date are required/
+  );
+});

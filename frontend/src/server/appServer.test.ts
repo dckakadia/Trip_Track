@@ -55,6 +55,11 @@ test('app server exposes the full workflow over its JSON API', async () => {
     assert.equal(badLogin.status, 401);
 
     // Trip lifecycle.
+    const missingName = await api(base, 'POST', '/api/trips', { start_date: '2026-09-10' });
+    assert.equal(missingName.status, 400);
+    assert.match(missingName.data.error, /Name is required/);
+    assert.ok(!('stack' in missingName.data), 'error response must not leak a stack trace');
+
     const created = await api(base, 'POST', '/api/trips', { name: 'API Trip', start_date: '2026-09-10' });
     assert.equal(created.status, 201);
     const tripId = created.data.id as string;

@@ -4,7 +4,18 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { connect } from 'node:net';
 import { startSyncServer } from './server.ts';
+
+function rawRequest(port: number, requestText: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1', () => socket.write(requestText));
+    let buf = '';
+    socket.on('data', (chunk) => (buf += chunk.toString()));
+    socket.on('close', () => resolve(buf));
+    socket.on('error', reject);
+  });
+}
 
 const uploadDir = mkdtempSync(join(tmpdir(), 'triptrack-uploads-'));
 process.env.TRIPTRACK_UPLOAD_DIR = uploadDir;
@@ -61,6 +72,27 @@ test('sync server push/pull with last-write-wins and photo upload', async () => 
     });
     assert.equal(bad.status, 400);
 
+    // Push with an unrecognized/malicious column name: rejected, not interpolated into SQL.
+    const maliciousId = randomUUID();
+    const maliciousPush = await fetch(`${base}/api/sync/push`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        table_name: 'trips',
+        row_id: maliciousId,
+        op: 'upsert',
+        payload: JSON.stringify({
+          id: maliciousId,
+          name: 'Injected',
+          updated_at: t1,
+          "id); DROP TABLE trips; --": 'malicious'
+        })
+      })
+    });
+    assert.equal(maliciousPush.status, 400);
+    const bodyAfterMalicious = (await maliciousPush.json()) as { error: string };
+    assert.match(bodyAfterMalicious.error, /unknown column/);
+
     // Pull with no `since` returns the stored row without server bookkeeping columns.
     const pull = await fetch(`${base}/api/sync/pull`);
     const { changes } = (await pull.json()) as { changes: Array<{ table_name: string; row: Record<string, unknown> }> };
@@ -89,6 +121,31 @@ test('sync server push/pull with last-write-wins and photo upload', async () => 
     assert.equal(served.status, 200);
     assert.deepEqual(Buffer.from(await served.arrayBuffer()), bytes);
   } finally {
+    server.close();
+  }
+});
+
+test('a request with an empty Host header gets a clean response, not a crash', async () => {
+  const { server, port } = await startSyncServer(0);
+  let unhandled: unknown = null;
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandled = reason;
+  };
+  process.on('unhandledRejection', onUnhandledRejection);
+
+  try {
+    // `new URL(path, \`http://${host}\`)` throws when host is empty — this must be caught
+    // inside handleRequest, not escape as an unhandled rejection that kills the process.
+    const response = await rawRequest(port, 'GET /health HTTP/1.1\r\nHost: \r\nConnection: close\r\n\r\n');
+    assert.match(response, /^HTTP\/1\.1 \d{3}/);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(unhandled, null, `expected no unhandled rejection, got: ${unhandled}`);
+
+    // The server is still alive and serving normal requests afterward.
+    const health = await fetch(`http://localhost:${port}/health`);
+    assert.deepEqual(await health.json(), { ok: true });
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandledRejection);
     server.close();
   }
 });

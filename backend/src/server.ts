@@ -70,6 +70,15 @@ function applyPush(body: PushBody): { applied: boolean } {
     return { applied: false };
   }
 
+  const validColumns = new Set(
+    (db.prepare(`PRAGMA table_info(${body.table_name})`).all() as Array<{ name: string }>).map((column) => column.name)
+  );
+  for (const column of Object.keys(row)) {
+    if (!validColumns.has(column)) {
+      throw new Error(`Pushed row for table ${body.table_name} has unknown column: ${column}`);
+    }
+  }
+
   const stored = { ...row, synced: 1, server_updated_at: nowIso() };
   const columns = Object.keys(stored);
   db.prepare(
@@ -107,8 +116,11 @@ function storeUpload(body: UploadBody): { url: string } {
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   try {
+    // Parsing must happen inside the try: a request with an empty Host header (a client can
+    // send `Host: ` with no value) makes `new URL()` throw — outside a try/catch that becomes
+    // an unhandled rejection that takes the whole process down, not just this one request.
+    const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`);
     if (req.method === 'GET' && url.pathname === '/health') {
       sendJson(res, 200, { ok: true });
       return;

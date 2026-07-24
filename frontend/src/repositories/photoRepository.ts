@@ -17,6 +17,9 @@ export interface CreatePhotoInput {
 
 export async function createPhoto(input: CreatePhotoInput): Promise<string> {
   try {
+    if (!input.parent_type || !input.parent_id || !input.local_path) {
+      throw new Error('parent_type, parent_id, and local_path are required');
+    }
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
@@ -81,7 +84,7 @@ export async function updatePhoto(
       throw new Error('Photo not found');
     }
 
-    const { setSql, values } = buildUpdateClause(updates);
+    const { setSql, values } = buildUpdateClause('photos', updates);
     db.prepare(`UPDATE photos SET ${setSql} WHERE id = ?`).run(...values, id);
     const updated = await getPhotoById(id);
     if (!updated) {
