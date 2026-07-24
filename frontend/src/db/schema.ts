@@ -70,6 +70,7 @@ export interface UserRecord extends BaseRecord {
   email: string | null;
   role: UserRole;
   active: number;
+  password_hash: string | null;
 }
 
 export type PhotoParentType = 'visit' | 'sample' | 'supplier' | 'city';
@@ -211,6 +212,7 @@ export const SCHEMA_STATEMENTS = [
     email TEXT,
     role TEXT DEFAULT 'MEMBER',
     active INTEGER DEFAULT 1,
+    password_hash TEXT,
     updated_at TEXT,
     deleted INTEGER DEFAULT 0,
     synced INTEGER DEFAULT 0
@@ -252,5 +254,6 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; ddl: stri
   { table: 'suppliers', column: 'region', ddl: 'ALTER TABLE suppliers ADD COLUMN region TEXT' },
   { table: 'suppliers', column: 'established', ddl: 'ALTER TABLE suppliers ADD COLUMN established TEXT' },
   { table: 'suppliers', column: 'employees', ddl: 'ALTER TABLE suppliers ADD COLUMN employees TEXT' },
-  { table: 'suppliers', column: 'export_markets', ddl: 'ALTER TABLE suppliers ADD COLUMN export_markets TEXT' }
+  { table: 'suppliers', column: 'export_markets', ddl: 'ALTER TABLE suppliers ADD COLUMN export_markets TEXT' },
+  { table: 'users', column: 'password_hash', ddl: 'ALTER TABLE users ADD COLUMN password_hash TEXT' }
 ];

@@ -10,12 +10,34 @@
   <header class="topbar">
     <h1>TripTrack</h1>
     <div class="sync-area">
+      <span id="current-user" class="sync-status hidden"></span>
       <span id="sync-status" class="sync-status">…</span>
       <button id="sync-button" type="button">Sync now</button>
+      <button id="logout-button" class="hidden" type="button">Sign out</button>
     </div>
   </header>
 
-  <nav class="tabs">
+  <!-- ===== Auth (shown instead of the app until signed in) ===== -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <form id="setup-form" class="card form-grid hidden">
+      <h2>Welcome to TripTrack</h2>
+      <p class="muted">First run — create the admin account.</p>
+      <input name="name" placeholder="Your name" required />
+      <input name="email" type="email" placeholder="Email" required autocomplete="username" />
+      <input name="password" type="password" placeholder="Password (min 6 characters)" minlength="6" required autocomplete="new-password" />
+      <button type="submit">Create admin account</button>
+      <p id="setup-error" class="form-error"></p>
+    </form>
+    <form id="login-form" class="card form-grid hidden">
+      <h2>Sign in</h2>
+      <input name="email" type="email" placeholder="Email" required autocomplete="username" />
+      <input name="password" type="password" placeholder="Password" required autocomplete="current-password" />
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="form-error"></p>
+    </form>
+  </div>
+
+  <nav class="tabs hidden">
     <button class="tab active" data-view="today" type="button"><span class="tab-icon">☀️</span><span>Today</span></button>
     <button class="tab" data-view="schedule" type="button"><span class="tab-icon">📅</span><span>Schedule</span></button>
     <button class="tab" data-view="suppliers" type="button"><span class="tab-icon">🏭</span><span>Suppliers</span></button>
@@ -23,7 +45,7 @@
     <button class="tab" data-view="admin" type="button"><span class="tab-icon">⚙️</span><span>Admin</span></button>
   </nav>
 
-  <main>
+  <main class="hidden">
     <!-- ===== Today ===== -->
     <section id="view-today" class="view">
       <h2 id="today-title" class="view-title">Today</h2>
@@ -149,6 +171,7 @@
         <input type="hidden" name="id" />
         <input name="name" placeholder="Name" required />
         <input name="email" type="email" placeholder="Email" required />
+        <input name="password" type="password" placeholder="Password (min 6 chars; blank on edit = unchanged)" minlength="6" autocomplete="new-password" />
         <select name="role">
           <option value="MEMBER">Member</option>
           <option value="ADMIN">Admin</option>

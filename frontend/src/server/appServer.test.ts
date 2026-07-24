@@ -3,13 +3,24 @@ import assert from 'node:assert/strict';
 import { startAppServer } from './appServer.ts';
 import { startSyncServer } from '../../../backend/src/server.ts';
 
-async function api(base: string, method: string, path: string, body?: unknown): Promise<{ status: number; data: any }> {
+let sessionCookie = '';
+
+async function api(
+  base: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  cookie: string = sessionCookie
+): Promise<{ status: number; data: any; setCookie: string }> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (cookie) headers.cookie = cookie;
   const res = await fetch(`${base}${path}`, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body)
   });
-  return { status: res.status, data: await res.json() };
+  return { status: res.status, data: await res.json(), setCookie: res.headers.get('set-cookie') ?? '' };
 }
 
 test('app server exposes the full workflow over its JSON API', async () => {
@@ -19,6 +30,30 @@ test('app server exposes the full workflow over its JSON API', async () => {
   const base = `http://localhost:${port}`;
 
   try {
+    // --- Auth: everything is locked until first-run setup ---
+    const locked = await api(base, 'GET', '/api/trips');
+    assert.equal(locked.status, 401);
+
+    const status0 = await api(base, 'GET', '/api/auth/status');
+    assert.equal(status0.data.needs_setup, true);
+    assert.equal(status0.data.authenticated, false);
+
+    const setup = await api(base, 'POST', '/api/auth/setup', {
+      name: 'Admin',
+      email: 'admin@example.com',
+      password: 'secret123'
+    });
+    assert.equal(setup.status, 201);
+    assert.equal(setup.data.user.role, 'ADMIN');
+    assert.ok(!('password_hash' in setup.data.user));
+    sessionCookie = setup.setCookie.split(';')[0]!;
+
+    const setupAgain = await api(base, 'POST', '/api/auth/setup', { name: 'X', email: 'x@example.com', password: 'secret123' });
+    assert.equal(setupAgain.status, 403);
+
+    const badLogin = await api(base, 'POST', '/api/auth/login', { email: 'admin@example.com', password: 'wrong' }, '');
+    assert.equal(badLogin.status, 401);
+
     // Trip lifecycle.
     const created = await api(base, 'POST', '/api/trips', { name: 'API Trip', start_date: '2026-09-10' });
     assert.equal(created.status, 201);
@@ -104,16 +139,33 @@ test('app server exposes the full workflow over its JSON API', async () => {
     const removed = await api(base, 'DELETE', `/api/users/${user.data.id}`);
     assert.equal(removed.data.deleted, 1);
     const usersAfter = await api(base, 'GET', '/api/users');
-    assert.deepEqual(usersAfter.data, []);
+    assert.ok(!usersAfter.data.some((u: { email: string }) => u.email === 'devin@example.com'));
+    assert.ok(usersAfter.data.every((u: Record<string, unknown>) => !('password_hash' in u)));
+
+    // Members can use the app but not the admin endpoints.
+    const member = await api(base, 'POST', '/api/users', {
+      name: 'Member',
+      email: 'member@example.com',
+      role: 'MEMBER',
+      password: 'member123'
+    });
+    assert.equal(member.status, 201);
+    const memberLogin = await api(base, 'POST', '/api/auth/login', { email: 'member@example.com', password: 'member123' }, '');
+    assert.equal(memberLogin.status, 200);
+    const memberCookie = memberLogin.setCookie.split(';')[0]!;
+    const memberTrips = await api(base, 'GET', '/api/trips', undefined, memberCookie);
+    assert.equal(memberTrips.status, 200);
+    const memberUsers = await api(base, 'GET', '/api/users', undefined, memberCookie);
+    assert.equal(memberUsers.status, 403);
 
     // --- Admin: export / import ---
-    const exportRes = await fetch(`${base}/api/admin/export`);
+    const exportRes = await fetch(`${base}/api/admin/export`, { headers: { cookie: sessionCookie } });
     assert.equal(exportRes.status, 200);
     assert.match(exportRes.headers.get('content-disposition') ?? '', /attachment; filename="triptrack-export-/);
     const dump = await exportRes.json();
     assert.equal(dump.format, 'triptrack-export');
     assert.equal(dump.tables.trips.length, 1);
-    assert.equal(dump.tables.users.length, 1); // soft-deleted user kept for full fidelity
+    assert.equal(dump.tables.users.length, 3); // setup admin + soft-deleted user + member, kept for full fidelity
 
     // Re-importing our own export is a clean no-op (everything skipped by LWW).
     const reimport = await api(base, 'POST', '/api/admin/import', dump);

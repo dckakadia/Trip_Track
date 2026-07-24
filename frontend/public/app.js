@@ -19,6 +19,7 @@ async function api(method, path, body) {
   });
   const data = await res.json();
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/api/auth/')) showAuth(false);
     throw new Error(data.error || `HTTP ${res.status}`);
   }
   return data;
@@ -598,13 +599,13 @@ document.getElementById('supplier-region').addEventListener('change', (event) =>
 });
 
 document.getElementById('sync-button').addEventListener('click', runSyncNow);
-setInterval(() => refreshSyncStatus().catch(() => {}), 30000);
 
 document.getElementById('user-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const values = formValues(form);
   const payload = { name: values.name, email: values.email, role: values.role, active: Number(values.active) };
+  if (values.password) payload.password = values.password;
   try {
     if (values.id) {
       await api('PATCH', `/api/users/${values.id}`, payload);
@@ -641,8 +642,62 @@ bindForm('city-form', '/api/cities', () => ({ trip_id: state.tripId }), renderTr
 bindForm('supplier-form', '/api/suppliers', null, renderSuppliers);
 bindForm('visit-form', '/api/visits', () => ({ trip_id: state.tripId }), renderSchedule);
 
-renderSuppliers()
-  .then(renderTrips)
-  .then(refreshSyncStatus)
-  .then(() => activateView(location.hash.slice(1) || 'today'))
-  .catch((error) => toast(error.message));
+// --- Auth ---
+
+let appStarted = false;
+
+function showAuth(needsSetup) {
+  document.querySelector('main').classList.add('hidden');
+  document.querySelector('.tabs').classList.add('hidden');
+  document.getElementById('logout-button').classList.add('hidden');
+  document.getElementById('current-user').classList.add('hidden');
+  document.getElementById('auth-screen').classList.remove('hidden');
+  document.getElementById('setup-form').classList.toggle('hidden', !needsSetup);
+  document.getElementById('login-form').classList.toggle('hidden', needsSetup);
+}
+
+function startApp(user) {
+  document.getElementById('auth-screen').classList.add('hidden');
+  document.querySelector('main').classList.remove('hidden');
+  document.querySelector('.tabs').classList.remove('hidden');
+  const userLabel = document.getElementById('current-user');
+  userLabel.textContent = user.name;
+  userLabel.classList.remove('hidden');
+  document.getElementById('logout-button').classList.remove('hidden');
+  document.querySelector('.tab[data-view="admin"]').classList.toggle('hidden', user.role !== 'ADMIN');
+  if (appStarted) return;
+  appStarted = true;
+  setInterval(() => refreshSyncStatus().catch(() => {}), 30000);
+  renderSuppliers()
+    .then(renderTrips)
+    .then(refreshSyncStatus)
+    .then(() => activateView(location.hash.slice(1) || 'today'))
+    .catch((error) => toast(error.message));
+}
+
+function bindAuthForm(formId, path, errorId) {
+  const form = document.getElementById(formId);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const errorLabel = document.getElementById(errorId);
+    errorLabel.textContent = '';
+    try {
+      const result = await api('POST', path, formValues(form));
+      form.reset();
+      startApp(result.user);
+    } catch (error) {
+      errorLabel.textContent = error.message;
+    }
+  });
+}
+bindAuthForm('setup-form', '/api/auth/setup', 'setup-error');
+bindAuthForm('login-form', '/api/auth/login', 'login-error');
+
+document.getElementById('logout-button').addEventListener('click', async () => {
+  await api('POST', '/api/auth/logout').catch(() => {});
+  location.reload();
+});
+
+api('GET', '/api/auth/status')
+  .then((status) => (status.authenticated ? startApp(status.user) : showAuth(status.needs_setup)))
+  .catch(() => showAuth(false));

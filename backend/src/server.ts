@@ -153,7 +153,9 @@ export function startSyncServer(port: number): Promise<{ server: Server; port: n
   return new Promise((resolve, reject) => {
     const server = createSyncServer();
     server.on('error', reject);
-    server.listen(port, () => {
+    // TRIPTRACK_BIND=127.0.0.1 keeps the sync API private to the host when the
+    // app server is the only client (it has no auth of its own).
+    server.listen(port, process.env.TRIPTRACK_BIND, () => {
       const address = server.address();
       if (address && typeof address === 'object') {
         resolve({ server, port: address.port });

@@ -11,6 +11,7 @@ export interface CreateUserInput {
   email: string;
   role?: UserRole;
   active?: number;
+  password_hash?: string | null;
 }
 
 function assertValidRole(role: string): asserts role is UserRole {
@@ -40,8 +41,8 @@ export async function createUser(input: CreateUserInput): Promise<string> {
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO users (id, name, email, role, active, updated_at, deleted, synced) VALUES (?, ?, ?, ?, ?, ?, 0, 0)`
-    ).run(id, input.name, input.email, role, input.active ?? 1, nowIso());
+      `INSERT INTO users (id, name, email, role, active, password_hash, updated_at, deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`
+    ).run(id, input.name, input.email, role, input.active ?? 1, input.password_hash ?? null, nowIso());
     queueRowUpsert('users', id);
     return id;
   } catch (error) {
@@ -58,6 +59,29 @@ export async function getUserById(id: string): Promise<UserRecord | null> {
   }
 }
 
+export async function getUserByEmail(email: string): Promise<UserRecord | null> {
+  try {
+    const row = getDatabase().prepare('SELECT * FROM users WHERE email = ? AND deleted = 0').get(email) as
+      | UserRecord
+      | undefined;
+    return row ?? null;
+  } catch (error) {
+    handleDbError('read user', error);
+  }
+}
+
+// First-run check: setup is only open while nobody can actually log in.
+export async function countCredentialedUsers(): Promise<number> {
+  try {
+    const row = getDatabase()
+      .prepare('SELECT COUNT(*) AS count FROM users WHERE deleted = 0 AND active = 1 AND password_hash IS NOT NULL')
+      .get() as { count: number };
+    return row.count;
+  } catch (error) {
+    handleDbError('count users', error);
+  }
+}
+
 export async function listUsers(): Promise<UserRecord[]> {
   try {
     return getDatabase().prepare('SELECT * FROM users WHERE deleted = 0 ORDER BY name').all() as UserRecord[];
@@ -68,7 +92,7 @@ export async function listUsers(): Promise<UserRecord[]> {
 
 export async function updateUser(
   id: string,
-  updates: Partial<Pick<UserRecord, 'name' | 'email' | 'role' | 'active'>>
+  updates: Partial<Pick<UserRecord, 'name' | 'email' | 'role' | 'active' | 'password_hash'>>
 ): Promise<UserRecord> {
   try {
     const existing = await getUserById(id);

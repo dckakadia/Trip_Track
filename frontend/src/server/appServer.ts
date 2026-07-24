@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializeDatabase } from '../db/migrations.ts';
-import type { PhotoParentType, VisitStatus } from '../db/schema.ts';
+import type { PhotoParentType, UserRecord, VisitStatus } from '../db/schema.ts';
 import { createTrip, getTripById, listTrips, softDeleteTrip, updateTrip } from '../repositories/tripRepository.ts';
 import { createCity, listCitiesByTrip, softDeleteCity, updateCity } from '../repositories/cityRepository.ts';
 import {
@@ -28,7 +28,26 @@ import {
   updateSample
 } from '../repositories/sampleRepository.ts';
 import { listPhotosByParent } from '../repositories/photoRepository.ts';
-import { createUser, getUserById, listUsers, softDeleteUser, updateUser } from '../repositories/userRepository.ts';
+import {
+  countCredentialedUsers,
+  createUser,
+  getUserByEmail,
+  getUserById,
+  listUsers,
+  softDeleteUser,
+  updateUser
+} from '../repositories/userRepository.ts';
+import {
+  MIN_PASSWORD_LENGTH,
+  SESSION_COOKIE,
+  clearedSessionCookie,
+  createSessionToken,
+  hashPassword,
+  parseCookies,
+  sessionCookie,
+  verifyPassword,
+  verifySessionToken
+} from './auth.ts';
 import { exportData, importData, type DataDump } from '../sync/dataTransfer.ts';
 import { buildSampleXlsx, importSupplierFile } from '../importers/supplierImport.ts';
 import { getSetting } from '../repositories/settingsRepository.ts';
@@ -85,6 +104,78 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
   } catch {
     sendJson(res, 404, { error: 'Not found' });
   }
+}
+
+function publicUser(user: UserRecord): Omit<UserRecord, 'password_hash'> {
+  const { password_hash, ...rest } = user;
+  return rest;
+}
+
+async function getSessionUser(req: IncomingMessage): Promise<UserRecord | null> {
+  const userId = await verifySessionToken(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+  if (!userId) {
+    return null;
+  }
+  const user = await getUserById(userId);
+  return user && !user.deleted && user.active ? user : null;
+}
+
+function assertPassword(password: unknown): string {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+  }
+  return password;
+}
+
+// /api/auth/* endpoints — the only API surface reachable without a session.
+async function handleAuthApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+  const { pathname } = url;
+  const method = req.method ?? 'GET';
+
+  if (pathname === '/api/auth/status' && method === 'GET') {
+    const user = await getSessionUser(req);
+    sendJson(res, 200, {
+      needs_setup: (await countCredentialedUsers()) === 0,
+      authenticated: user !== null,
+      user: user ? publicUser(user) : null
+    });
+    return true;
+  }
+  if (pathname === '/api/auth/setup' && method === 'POST') {
+    if ((await countCredentialedUsers()) > 0) {
+      sendJson(res, 403, { error: 'Already set up — sign in instead' });
+      return true;
+    }
+    const body = await readJsonBody(req);
+    const password = assertPassword(body.password);
+    const id = await createUser({
+      name: String(body.name ?? ''),
+      email: String(body.email ?? ''),
+      role: 'ADMIN',
+      password_hash: hashPassword(password)
+    });
+    const user = await getUserById(id);
+    res.setHeader('set-cookie', sessionCookie(await createSessionToken(id)));
+    sendJson(res, 201, { user: user ? publicUser(user) : null });
+    return true;
+  }
+  if (pathname === '/api/auth/login' && method === 'POST') {
+    const body = await readJsonBody(req);
+    const user = await getUserByEmail(String(body.email ?? ''));
+    if (!user || !user.active || !verifyPassword(String(body.password ?? ''), user.password_hash)) {
+      sendJson(res, 401, { error: 'Invalid email or password' });
+      return true;
+    }
+    res.setHeader('set-cookie', sessionCookie(await createSessionToken(user.id)));
+    sendJson(res, 200, { user: publicUser(user) });
+    return true;
+  }
+  if (pathname === '/api/auth/logout' && method === 'POST') {
+    res.setHeader('set-cookie', clearedSessionCookie());
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+  return false;
 }
 
 async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
@@ -234,22 +325,31 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
 
   // --- Users (admin) ---
   if (pathname === '/api/users' && method === 'GET') {
-    sendJson(res, 200, await listUsers());
+    sendJson(res, 200, (await listUsers()).map(publicUser));
     return true;
   }
   if (pathname === '/api/users' && method === 'POST') {
-    const body = await readJsonBody(req);
-    const id = await createUser(body as Parameters<typeof createUser>[0]);
-    sendJson(res, 201, await getUserById(id));
+    const { password, ...body } = await readJsonBody(req);
+    const id = await createUser({
+      ...(body as Parameters<typeof createUser>[0]),
+      password_hash: password === undefined ? null : hashPassword(assertPassword(password))
+    });
+    const created = await getUserById(id);
+    sendJson(res, 201, created ? publicUser(created) : null);
     return true;
   }
   const userMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
   if (userMatch && method === 'PATCH') {
-    sendJson(res, 200, await updateUser(userMatch[1]!, await readJsonBody(req)));
+    const { password, ...body } = await readJsonBody(req);
+    const updates = body as Parameters<typeof updateUser>[1];
+    if (password !== undefined) {
+      updates.password_hash = hashPassword(assertPassword(password));
+    }
+    sendJson(res, 200, publicUser(await updateUser(userMatch[1]!, updates)));
     return true;
   }
   if (userMatch && method === 'DELETE') {
-    sendJson(res, 200, await softDeleteUser(userMatch[1]!));
+    sendJson(res, 200, publicUser(await softDeleteUser(userMatch[1]!)));
     return true;
   }
 
@@ -297,6 +397,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   try {
     if (url.pathname.startsWith('/api/')) {
+      if (await handleAuthApi(req, res, url)) {
+        return;
+      }
+      const user = await getSessionUser(req);
+      if (!user) {
+        sendJson(res, 401, { error: 'Authentication required' });
+        return;
+      }
+      if ((url.pathname.startsWith('/api/users') || url.pathname.startsWith('/api/admin/')) && user.role !== 'ADMIN') {
+        sendJson(res, 403, { error: 'Admin access required' });
+        return;
+      }
       const handled = await handleApi(req, res, url);
       if (!handled) {
         sendJson(res, 404, { error: 'Not found' });

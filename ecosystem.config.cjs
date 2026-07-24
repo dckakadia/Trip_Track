@@ -14,6 +14,7 @@ module.exports = {
       interpreter_args: '--experimental-strip-types',
       env: {
         PORT: '4600',
+        TRIPTRACK_BIND: '127.0.0.1',
         TRIPTRACK_SERVER_DB: `${HOME}/triptrack-data/server.db`,
         TRIPTRACK_UPLOAD_DIR: `${HOME}/triptrack-data/uploads`,
       },
