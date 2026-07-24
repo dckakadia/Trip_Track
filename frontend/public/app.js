@@ -588,6 +588,7 @@ function activateView(name) {
   if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
   if (name === 'today') renderToday().catch((error) => toast(error.message));
   if (name === 'schedule') renderSchedule().catch((error) => toast(error.message));
+  if (name === 'admin') renderUsers().catch((error) => toast(error.message));
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {

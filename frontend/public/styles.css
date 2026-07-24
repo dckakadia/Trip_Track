@@ -20,7 +20,20 @@ body {
 
 .topbar h1 { margin: 0; font-size: 1.15rem; }
 
-.sync-area { display: flex; align-items: center; gap: 0.6rem; }
+.sync-area { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+.sync-area button {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sync-area button:disabled { opacity: 0.5; cursor: default; }
 .sync-status { font-size: 0.8rem; opacity: 0.85; }
 .sync-status.dirty { color: #ffd166; opacity: 1; }
 
@@ -250,6 +263,21 @@ button[type="submit"], #sync-button {
 
   main { padding-bottom: 5.5rem; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
+
+  /* Phones get single-column forms — two columns truncate values and
+     placeholders at handset widths. */
+  .form-grid { grid-template-columns: 1fr; }
+  .form-grid input, .form-grid select { padding: 0.55rem 0.6rem; font-size: 1rem; }
+
+  .topbar { padding: 0.55rem 0.8rem; }
+  .topbar h1 { font-size: 1.05rem; }
+
+  /* Card action buttons drop below the supplier name instead of crushing it. */
+  .supplier-header { flex-wrap: wrap; }
+  .supplier-actions { width: 100%; margin-top: 0.45rem; }
+  .map-link { padding: 0.4rem 0.7rem; }
+
+  .sample-form input { min-width: 8.5rem; }
 }
 
 .profile-row { display: flex; gap: 0.6rem; font-size: 0.87rem; line-height: 1.35; }
@@ -304,3 +332,5 @@ button.map-link {
 
 .map-link.danger { color: #c0392b; border-color: #e6c3bd; }
 .map-link.danger:hover { background: #fbeeec; }
+
+.auth-screen .form-grid { grid-template-columns: 1fr; }
