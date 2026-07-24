@@ -9,7 +9,7 @@ module.exports = {
     {
       name: 'triptrack-sync',
       cwd: `${HOME}/triptrack/backend`,
-      script: 'src/server.ts',
+      script: 'src/start.ts',
       interpreter: NODE24,
       interpreter_args: '--experimental-strip-types',
       env: {
@@ -21,7 +21,7 @@ module.exports = {
     {
       name: 'triptrack-app',
       cwd: `${HOME}/triptrack/frontend`,
-      script: 'src/server/appServer.ts',
+      script: 'src/server/start.ts',
       interpreter: NODE24,
       interpreter_args: '--experimental-strip-types',
       env: {
