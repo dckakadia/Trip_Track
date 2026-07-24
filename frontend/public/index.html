@@ -135,12 +135,14 @@
         <button class="add-toggle" data-target="trip-form" type="button">+ New trip</button>
       </div>
       <form id="trip-form" class="card form-grid hidden">
-        <h2>New trip</h2>
+        <h2 id="trip-form-title">New trip</h2>
+        <input type="hidden" name="id" />
         <input name="name" placeholder="Trip name" required />
         <input name="start_date" type="date" />
         <input name="end_date" type="date" />
         <input name="notes" placeholder="Notes" />
-        <button type="submit">Add trip</button>
+        <button type="submit" id="trip-form-submit">Add trip</button>
+        <button type="button" id="trip-form-cancel" class="hidden">Cancel edit</button>
       </form>
       <div id="trip-list"></div>
       <div id="trip-detail" class="hidden">

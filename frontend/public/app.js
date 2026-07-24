@@ -155,6 +155,30 @@ function selectTrip(trip) {
   renderSchedule();
 }
 
+function clearSelectedTrip() {
+  state.tripId = null;
+  state.tripName = null;
+  localStorage.removeItem('triptrack.tripId');
+  localStorage.removeItem('triptrack.tripName');
+}
+
+function setTripFormMode(trip) {
+  const form = document.getElementById('trip-form');
+  form.querySelector('input[name="id"]').value = trip ? trip.id : '';
+  document.getElementById('trip-form-title').textContent = trip ? `Edit ${trip.name}` : 'New trip';
+  document.getElementById('trip-form-submit').textContent = trip ? 'Save changes' : 'Add trip';
+  document.getElementById('trip-form-cancel').classList.toggle('hidden', !trip);
+  if (trip) {
+    for (const input of form.querySelectorAll('input[name]')) {
+      if (input.name !== 'id') input.value = trip[input.name] ?? '';
+    }
+    form.classList.remove('hidden');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    form.reset();
+  }
+}
+
 async function renderTrips() {
   const trips = await api('GET', '/api/trips');
   if (!state.tripId && trips.length > 0) {
@@ -167,12 +191,35 @@ async function renderTrips() {
     list.append(el('p', 'muted', 'No trips yet — add your first sourcing trip.'));
   }
   for (const trip of trips) {
-    const item = el('div', 'item' + (trip.id === state.tripId ? ' selected' : ''));
+    const item = el('div', 'item trip-item' + (trip.id === state.tripId ? ' selected' : ''));
     const left = el('div');
     left.append(el('div', 'title', trip.name));
     left.append(el('div', 'sub', [trip.start_date, trip.end_date].filter(Boolean).join(' → ') || 'No dates'));
     item.append(left);
-    if (trip.id === state.tripId) item.append(el('span', 'status status-CONFIRMED', 'ACTIVE'));
+    const right = el('div', 'trip-actions');
+    if (trip.id === state.tripId) right.append(el('span', 'status status-CONFIRMED', 'ACTIVE'));
+    const editButton = el('button', 'map-link', '✏️ Edit');
+    editButton.type = 'button';
+    editButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setTripFormMode(trip);
+    });
+    const deleteButton = el('button', 'map-link danger', '🗑 Delete');
+    deleteButton.type = 'button';
+    deleteButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      if (!confirm(`Delete trip "${trip.name}"? This does not delete its cities or visits.`)) return;
+      try {
+        await api('DELETE', `/api/trips/${trip.id}`);
+        if (trip.id === state.tripId) clearSelectedTrip();
+        await renderTrips();
+        refreshSyncStatus().catch(() => {});
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    right.append(editButton, deleteButton);
+    item.append(right);
     item.addEventListener('click', () => selectTrip(trip));
     list.append(item);
   }
@@ -598,6 +645,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
 document.querySelectorAll('.add-toggle[data-target]').forEach((button) => {
   button.addEventListener('click', () => {
     if (button.dataset.target === 'supplier-form') setSupplierFormMode(null);
+    if (button.dataset.target === 'trip-form') setTripFormMode(null);
     document.getElementById(button.dataset.target).classList.toggle('hidden');
   });
 });
@@ -677,8 +725,36 @@ document.getElementById('supplier-import-file').addEventListener('change', (even
   event.currentTarget.value = '';
 });
 
-bindForm('trip-form', '/api/trips', null, renderTrips);
 bindForm('city-form', '/api/cities', () => ({ trip_id: state.tripId }), renderTrips);
+
+// Trip form creates or, when an id is set via Edit, updates in place.
+document.getElementById('trip-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.querySelector('input[name="id"]').value;
+  try {
+    if (id) {
+      const payload = {};
+      for (const input of form.querySelectorAll('input[name]')) {
+        if (input.name !== 'id') payload[input.name] = input.value || null;
+      }
+      await api('PATCH', `/api/trips/${id}`, payload);
+      if (id === state.tripId) state.tripName = payload.name;
+    } else {
+      await api('POST', '/api/trips', formValues(form));
+    }
+    setTripFormMode(null);
+    form.classList.add('hidden');
+    await renderTrips();
+    refreshSyncStatus().catch(() => {});
+  } catch (error) {
+    toast(error.message);
+  }
+});
+document.getElementById('trip-form-cancel').addEventListener('click', () => {
+  setTripFormMode(null);
+  document.getElementById('trip-form').classList.add('hidden');
+});
 bindForm('visit-form', '/api/visits', () => ({ trip_id: state.tripId }), renderSchedule);
 
 // Supplier form creates or, when an id is set via Edit, updates in place.

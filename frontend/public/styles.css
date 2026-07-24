@@ -275,6 +275,8 @@ button[type="submit"], #sync-button {
   /* Card action buttons drop below the supplier name instead of crushing it. */
   .supplier-header { flex-wrap: wrap; }
   .supplier-actions { width: 100%; margin-top: 0.45rem; }
+  .item.trip-item { flex-wrap: wrap; }
+  .trip-actions { width: 100%; margin-top: 0.45rem; justify-content: flex-end; }
   .map-link { padding: 0.4rem 0.7rem; }
 
   .sample-form input { min-width: 8.5rem; }
@@ -318,8 +320,9 @@ button[type="submit"], #sync-button {
 
 .form-error:empty { display: none; }
 
-.supplier-actions {
+.supplier-actions, .trip-actions {
   display: flex;
+  align-items: center;
   gap: 0.35rem;
   flex-shrink: 0;
 }
