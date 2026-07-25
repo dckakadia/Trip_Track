@@ -930,11 +930,22 @@ bindForm('visit-form', '/api/visits', () => ({ trip_id: state.tripId }), renderS
 // separated by a regular or full-width comma, or just whitespace.
 function parseCoordinates(text) {
   const match = /(-?\d{1,3}\.\d{2,})[,，\s]+(-?\d{1,3}\.\d{2,})/.exec(text);
-  if (!match) return null;
-  const lat = Number(match[1]);
-  const lng = Number(match[2]);
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-  return { lat, lng };
+  if (match) {
+    const lat = Number(match[1]);
+    const lng = Number(match[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+  // Some copy/paste paths turn the lat/lng comma into a period — e.g.
+  // "31.1934930.119.1855390" instead of "31.1934930,119.1855390" — leaving four
+  // dot-separated digit groups instead of one comma. Recover the split: the first
+  // two groups are one decimal number, the last two are the other.
+  const merged = /(-?\d{1,3})\.(\d{2,})\.(-?\d{1,3})\.(\d{2,})/.exec(text);
+  if (merged) {
+    const lat = Number(`${merged[1]}.${merged[2]}`);
+    const lng = Number(`${merged[3]}.${merged[4]}`);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+  return null;
 }
 
 function setCoordsStatus(message, isError) {
