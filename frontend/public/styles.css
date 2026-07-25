@@ -80,6 +80,10 @@ main { padding: 1rem; max-width: 720px; margin: 0 auto; }
 .coords-helper input { flex: 1; min-width: 0; }
 .coords-helper button { flex-shrink: 0; }
 
+.coords-status { grid-column: 1 / -1; margin: -0.3rem 0 0; font-size: 0.85rem; color: #2f7d3a; }
+.coords-status.error { color: #c0392b; }
+.coords-status:empty { display: none; }
+
 input, select, button {
   font: inherit;
   padding: 0.5rem 0.6rem;

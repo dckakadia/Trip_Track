@@ -427,6 +427,8 @@ function setSupplierFormMode(supplier) {
   document.getElementById('supplier-form-title').textContent = supplier ? `Edit ${supplier.name}` : 'New supplier';
   document.getElementById('supplier-form-submit').textContent = supplier ? 'Save changes' : 'Add supplier';
   document.getElementById('supplier-form-cancel').classList.toggle('hidden', !supplier);
+  document.getElementById('supplier-coords-input').value = '';
+  setCoordsStatus('', false);
   if (supplier) {
     for (const input of form.querySelectorAll('input[name]')) {
       if (input.name !== 'id') input.value = supplier[input.name] ?? '';
@@ -924,9 +926,10 @@ bindForm('visit-form', '/api/visits', () => ({ trip_id: state.tripId }), renderS
 // Builds a Google Maps link from pasted coordinates, so a supplier location can be
 // mapped from any GPS source (phone GPS, Apple Maps, WeChat share, Amap, Baidu) without
 // needing Google Maps itself to load — useful where Google Maps is blocked (e.g. mainland
-// China). Accepts "lat,lng" possibly embedded in other text (a share-sheet URL, a label).
+// China). Accepts "lat,lng" possibly embedded in other text (a share-sheet URL, a label),
+// separated by a regular or full-width comma, or just whitespace.
 function parseCoordinates(text) {
-  const match = /(-?\d{1,3}\.\d{2,})\s*,\s*(-?\d{1,3}\.\d{2,})/.exec(text);
+  const match = /(-?\d{1,3}\.\d{2,})[,，\s]+(-?\d{1,3}\.\d{2,})/.exec(text);
   if (!match) return null;
   const lat = Number(match[1]);
   const lng = Number(match[2]);
@@ -934,11 +937,22 @@ function parseCoordinates(text) {
   return { lat, lng };
 }
 
+function setCoordsStatus(message, isError) {
+  const status = document.getElementById('supplier-coords-status');
+  status.textContent = message;
+  status.classList.toggle('error', Boolean(isError));
+}
+
 function applyCoordsHelper() {
   const input = document.getElementById('supplier-coords-input');
   const coords = parseCoordinates(input.value);
   if (!coords) {
-    toast('Could not find coordinates like "31.23, 121.47" in that text');
+    // Shown inline next to the button, not just via the header toast — that toast is easy to
+    // miss when this button is scrolled far down a long form (which it usually is).
+    setCoordsStatus(
+      input.value.trim() ? `Could not find coordinates like "31.23, 121.47" in "${input.value.trim()}"` : 'Paste coordinates first',
+      true
+    );
     return;
   }
   const form = document.getElementById('supplier-form');
@@ -946,6 +960,7 @@ function applyCoordsHelper() {
   form.querySelector('input[name="gps_lat"]').value = coords.lat;
   form.querySelector('input[name="gps_lng"]').value = coords.lng;
   input.value = '';
+  setCoordsStatus(`✓ Map link built from ${coords.lat}, ${coords.lng} — save the form to keep it`, false);
   toast('Map link built — will also show on the Map tab once saved');
 }
 document.getElementById('supplier-coords-apply').addEventListener('click', applyCoordsHelper);
