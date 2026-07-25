@@ -120,6 +120,30 @@ test('importSupplierRows maps aliased headers, dedupes, and reports invalid rows
   assert.equal(countPendingOps(), before + 2);
 });
 
+test('importSupplierRows maps Latitude/Longitude columns, rejecting out-of-range values', async () => {
+  initializeDatabase();
+  const result = await importSupplierRows([
+    ['Name', 'Latitude', 'Longitude'],
+    ['Valid Coords Ltd', '31.230416', '121.473701'],
+    ['Bad Coords Ltd', '999', '121.473701'],
+    ['No Coords Ltd', '', '']
+  ]);
+  assert.equal(result.imported, 3);
+
+  const suppliers = await listSuppliers();
+  const valid = suppliers.find((s) => s.name === 'Valid Coords Ltd');
+  assert.equal(valid?.gps_lat, 31.230416);
+  assert.equal(valid?.gps_lng, 121.473701);
+
+  const bad = suppliers.find((s) => s.name === 'Bad Coords Ltd');
+  assert.equal(bad?.gps_lat, null); // out of range (-90..90) — rejected, not stored garbage
+  assert.equal(bad?.gps_lng, 121.473701);
+
+  const none = suppliers.find((s) => s.name === 'No Coords Ltd');
+  assert.equal(none?.gps_lat, null);
+  assert.equal(none?.gps_lng, null);
+});
+
 test('importSupplierFile dispatches by extension and rejects unknown types', async () => {
   initializeDatabase();
 

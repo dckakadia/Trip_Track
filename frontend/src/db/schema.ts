@@ -43,6 +43,8 @@ export interface SupplierRecord extends BaseRecord {
   employees: string | null;
   export_markets: string | null;
   map_url: string | null;
+  gps_lat: number | null;
+  gps_lng: number | null;
   notes: string | null;
 }
 
@@ -149,6 +151,8 @@ export const SCHEMA_STATEMENTS = [
     employees TEXT,
     export_markets TEXT,
     map_url TEXT,
+    gps_lat REAL,
+    gps_lng REAL,
     notes TEXT,
     updated_at TEXT,
     deleted INTEGER DEFAULT 0,
@@ -261,5 +265,7 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; ddl: stri
   { table: 'suppliers', column: 'established', ddl: 'ALTER TABLE suppliers ADD COLUMN established TEXT' },
   { table: 'suppliers', column: 'employees', ddl: 'ALTER TABLE suppliers ADD COLUMN employees TEXT' },
   { table: 'suppliers', column: 'export_markets', ddl: 'ALTER TABLE suppliers ADD COLUMN export_markets TEXT' },
+  { table: 'suppliers', column: 'gps_lat', ddl: 'ALTER TABLE suppliers ADD COLUMN gps_lat REAL' },
+  { table: 'suppliers', column: 'gps_lng', ddl: 'ALTER TABLE suppliers ADD COLUMN gps_lng REAL' },
   { table: 'users', column: 'password_hash', ddl: 'ALTER TABLE users ADD COLUMN password_hash TEXT' }
 ];

@@ -169,6 +169,8 @@ const HEADER_ALIASES: Record<keyof Omit<CreateSupplierInput, 'city_id'>, string[
   address_en: ['address', 'addressen', 'englishaddress', 'factoryaddress', 'headquartersfactoryaddress', 'headquarters', 'hqaddress'],
   address_cn: ['addresscn', 'chineseaddress', 'addresschinese'],
   map_url: ['mapurl', 'maplink', 'map', 'googlemaps', 'googlemapslink', 'googlemapsurl'],
+  gps_lat: ['lat', 'latitude', 'gpslat', 'gpslatitude'],
+  gps_lng: ['lng', 'lon', 'long', 'longitude', 'gpslng', 'gpslongitude'],
   notes: ['notes', 'note', 'remarks', 'remark', 'comments', 'comment']
 };
 
@@ -237,6 +239,12 @@ export async function importSupplierRows(rows: string[][]): Promise<SupplierImpo
         return value === '' || value === '-' || value === '—' ? null : value;
       };
       const cell = (field: keyof typeof HEADER_ALIASES): string | null => cellAt(columns[field]);
+      const cellNumber = (field: keyof typeof HEADER_ALIASES, min: number, max: number): number | null => {
+        const raw = cell(field);
+        if (raw === null) return null;
+        const value = Number(raw);
+        return Number.isFinite(value) && value >= min && value <= max ? value : null;
+      };
 
       const name = cell('name');
       if (!name) {
@@ -276,6 +284,8 @@ export async function importSupplierRows(rows: string[][]): Promise<SupplierImpo
         address_en: cell('address_en'),
         address_cn: cell('address_cn'),
         map_url: cell('map_url'),
+        gps_lat: cellNumber('gps_lat', -90, 90),
+        gps_lng: cellNumber('gps_lng', -180, 180),
         notes
       });
       existing.add(name.toLowerCase());

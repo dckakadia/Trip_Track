@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TripTrack</title>
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -41,6 +42,7 @@
     <button class="tab active" data-view="today" type="button"><span class="tab-icon">☀️</span><span>Today</span></button>
     <button class="tab" data-view="schedule" type="button"><span class="tab-icon">📅</span><span>Schedule</span></button>
     <button class="tab" data-view="suppliers" type="button"><span class="tab-icon">🏭</span><span>Suppliers</span></button>
+    <button class="tab" data-view="map" type="button"><span class="tab-icon">🗺️</span><span>Map</span></button>
     <button class="tab" data-view="trips" type="button"><span class="tab-icon">🧳</span><span>Trips</span></button>
     <button class="tab" data-view="admin" type="button"><span class="tab-icon">⚙️</span><span>Admin</span></button>
   </nav>
@@ -114,6 +116,8 @@
           <button type="button" id="supplier-coords-apply" class="file-button outline">Build map link</button>
         </div>
         <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
+        <input type="hidden" name="gps_lat" />
+        <input type="hidden" name="gps_lng" />
         <button type="submit" id="supplier-form-submit">Add supplier</button>
         <button type="button" id="supplier-form-cancel" class="hidden">Cancel edit</button>
       </form>
@@ -130,6 +134,16 @@
         <p id="supplier-import-result" class="muted"></p>
       </div>
       <div id="supplier-list"></div>
+    </section>
+
+    <!-- ===== Map ===== -->
+    <section id="view-map" class="view hidden">
+      <div class="section-head">
+        <h3>Supplier Map</h3>
+        <select id="map-region"><option value="">All regions</option></select>
+      </div>
+      <p id="map-summary" class="muted"></p>
+      <div id="supplier-map" class="supplier-map"></div>
     </section>
 
     <!-- ===== Trips ===== -->
@@ -210,6 +224,7 @@
     </section>
   </main>
 
+  <script src="/vendor/leaflet/leaflet.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -67,3 +67,20 @@ test('createSupplier requires a name', async () => {
   initializeDatabase();
   await assert.rejects(createSupplier({ name: '' }), /Name is required/);
 });
+
+test('supplier gps_lat/gps_lng round-trip through create and update', async () => {
+  initializeDatabase();
+  const id = await createSupplier({ name: 'Mapped Supplier', gps_lat: 31.230416, gps_lng: 121.473701 });
+  const created = await getSupplierById(id);
+  assert.equal(created?.gps_lat, 31.230416);
+  assert.equal(created?.gps_lng, 121.473701);
+
+  const withoutCoords = await createSupplier({ name: 'Unmapped Supplier' });
+  const unmapped = await getSupplierById(withoutCoords);
+  assert.equal(unmapped?.gps_lat, null);
+  assert.equal(unmapped?.gps_lng, null);
+
+  const updated = await updateSupplier(id, { gps_lat: 22.543099, gps_lng: 114.057868 });
+  assert.equal(updated.gps_lat, 22.543099);
+  assert.equal(updated.gps_lng, 114.057868);
+});

@@ -232,6 +232,21 @@ button[type="submit"], #sync-button {
 .search-bar input { flex: 1; min-width: 0; }
 .search-bar select { max-width: 45%; }
 
+#map-region { margin: 0; max-width: 12rem; }
+
+.supplier-map {
+  height: 65vh;
+  min-height: 22rem;
+  border-radius: 8px;
+  border: 1px solid #e1e4e9;
+  background: #e9ebee;
+}
+
+.supplier-map .leaflet-popup-content { font: inherit; font-size: 0.85rem; min-width: 10rem; }
+.supplier-map .leaflet-popup-content b { display: block; margin-bottom: 0.2rem; }
+.supplier-map .leaflet-popup-content .muted { color: #7a8391; }
+.supplier-map .leaflet-popup-content a { color: #14324f; }
+
 .day-bar {
   display: flex;
   align-items: center;

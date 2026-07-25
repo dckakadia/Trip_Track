@@ -24,6 +24,8 @@ export interface CreateSupplierInput {
   employees?: string | null;
   export_markets?: string | null;
   map_url?: string | null;
+  gps_lat?: number | null;
+  gps_lng?: number | null;
   notes?: string | null;
 }
 
@@ -35,8 +37,8 @@ export async function createSupplier(input: CreateSupplierInput): Promise<string
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO suppliers (id, name, name_cn, city_id, address_cn, address_en, contact_name, contact_mobile, whatsapp, email, website, wechat_id, product_category, products, specialty, region, established, employees, export_markets, map_url, notes, updated_at, deleted, synced)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
+      `INSERT INTO suppliers (id, name, name_cn, city_id, address_cn, address_en, contact_name, contact_mobile, whatsapp, email, website, wechat_id, product_category, products, specialty, region, established, employees, export_markets, map_url, gps_lat, gps_lng, notes, updated_at, deleted, synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
     ).run(
       id,
       input.name,
@@ -58,6 +60,8 @@ export async function createSupplier(input: CreateSupplierInput): Promise<string
       input.employees ?? null,
       input.export_markets ?? null,
       input.map_url ?? null,
+      input.gps_lat ?? null,
+      input.gps_lng ?? null,
       input.notes ?? null,
       nowIso()
     );

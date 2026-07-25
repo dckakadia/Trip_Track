@@ -4,7 +4,8 @@ const state = {
   scheduleDate: null,
   suppliers: [],
   supplierQuery: '',
-  supplierRegion: ''
+  supplierRegion: '',
+  mapRegion: ''
 };
 
 function todayIso() {
@@ -32,10 +33,12 @@ function el(tag, className, text) {
   return node;
 }
 
+const NUMERIC_FORM_FIELDS = new Set(['sort_order', 'qty', 'unit_price', 'gps_lat', 'gps_lng']);
+
 function formValues(form) {
   const values = {};
   for (const [key, value] of new FormData(form).entries()) {
-    if (value !== '') values[key] = key === 'sort_order' || key === 'qty' || key === 'unit_price' ? Number(value) : value;
+    if (value !== '') values[key] = NUMERIC_FORM_FIELDS.has(key) ? Number(value) : value;
   }
   return values;
 }
@@ -462,6 +465,97 @@ async function renderSuppliers() {
   }
 }
 
+// --- Map view ---
+
+// Icon.Default._getIconUrl always prepends imagePath in front of iconUrl/iconRetinaUrl/
+// shadowUrl — setting those to full paths (instead of just imagePath) double-prepends and
+// 404s. imagePath + Leaflet's own bare filenames is the correct, documented way to point
+// a self-hosted Leaflet at vendored (not CDN) marker images.
+L.Icon.Default.mergeOptions({
+  imagePath: '/vendor/leaflet/images/'
+});
+
+let supplierMap = null;
+let supplierMapMarkers = null;
+
+// gps_lat/gps_lng (set by the coordinates helper on the supplier form) win; suppliers saved
+// before that existed, or imported with only a map link, fall back to parsing one out of it.
+function supplierLocation(supplier) {
+  if (typeof supplier.gps_lat === 'number' && typeof supplier.gps_lng === 'number') {
+    return { lat: supplier.gps_lat, lng: supplier.gps_lng };
+  }
+  return parseCoordinates(supplier.map_url || '');
+}
+
+function supplierPopup(supplier, loc) {
+  const box = el('div');
+  box.append(el('b', null, supplier.name_cn ? `${supplier.name} · ${supplier.name_cn}` : supplier.name));
+  const details = [supplier.region, supplier.contact_name, supplier.contact_mobile].filter(Boolean).join(' · ');
+  if (details) box.append(el('div', 'muted', details));
+  const linkRow = el('div');
+  const link = el('a', null, 'Open in Maps →');
+  link.href = supplier.map_url || `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  linkRow.append(link);
+  box.append(linkRow);
+  return box;
+}
+
+function renderMap() {
+  const container = document.getElementById('supplier-map');
+  if (!supplierMap) {
+    supplierMap = L.map(container);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(supplierMap);
+    supplierMapMarkers = L.layerGroup().addTo(supplierMap);
+  }
+
+  const regionSelect = document.getElementById('map-region');
+  const current = state.mapRegion;
+  const regions = [...new Set(state.suppliers.map((s) => s.region).filter(Boolean))].sort();
+  regionSelect.replaceChildren(el('option', null, 'All regions'));
+  regionSelect.firstChild.value = '';
+  for (const region of regions) {
+    const option = el('option', null, region);
+    option.value = region;
+    regionSelect.append(option);
+  }
+  regionSelect.value = regions.includes(current) ? current : '';
+  state.mapRegion = regionSelect.value;
+
+  const filtered = state.suppliers.filter((s) => !state.mapRegion || s.region === state.mapRegion);
+
+  supplierMapMarkers.clearLayers();
+  const points = [];
+  for (const supplier of filtered) {
+    const loc = supplierLocation(supplier);
+    if (!loc) continue;
+    points.push([loc.lat, loc.lng]);
+    L.marker([loc.lat, loc.lng]).bindPopup(supplierPopup(supplier, loc)).addTo(supplierMapMarkers);
+  }
+
+  const missing = filtered.length - points.length;
+  const summary = document.getElementById('map-summary');
+  summary.textContent = points.length === 0
+    ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates, and hit "Build map link".'
+    : `${points.length} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
+      (missing > 0 ? ` · ${missing} missing a location` : '');
+
+  // The container is display:none until this tab is opened, so Leaflet computed zero size
+  // when the map was first created — invalidateSize() makes it re-measure now that it's visible.
+  requestAnimationFrame(() => {
+    supplierMap.invalidateSize();
+    if (points.length > 0) {
+      supplierMap.fitBounds(points, { padding: [30, 30], maxZoom: 14 });
+    } else {
+      supplierMap.setView([20, 0], 2);
+    }
+  });
+}
+
 // --- Schedule view ---
 
 function supplierName(id) {
@@ -671,6 +765,7 @@ function activateView(name) {
   if (name === 'today') renderToday().catch((error) => toast(error.message));
   if (name === 'schedule') renderSchedule().catch((error) => toast(error.message));
   if (name === 'admin') renderUsers().catch((error) => toast(error.message));
+  if (name === 'map') renderMap();
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -720,6 +815,10 @@ document.getElementById('supplier-search').addEventListener('input', (event) => 
 document.getElementById('supplier-region').addEventListener('change', (event) => {
   state.supplierRegion = event.currentTarget.value;
   renderSupplierList();
+});
+document.getElementById('map-region').addEventListener('change', (event) => {
+  state.mapRegion = event.currentTarget.value;
+  renderMap();
 });
 
 document.getElementById('sync-button').addEventListener('click', runSyncNow);
@@ -842,10 +941,12 @@ function applyCoordsHelper() {
     toast('Could not find coordinates like "31.23, 121.47" in that text');
     return;
   }
-  const mapUrlInput = document.querySelector('#supplier-form input[name="map_url"]');
-  mapUrlInput.value = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+  const form = document.getElementById('supplier-form');
+  form.querySelector('input[name="map_url"]').value = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+  form.querySelector('input[name="gps_lat"]').value = coords.lat;
+  form.querySelector('input[name="gps_lng"]').value = coords.lng;
   input.value = '';
-  toast('Map link built from coordinates');
+  toast('Map link built — will also show on the Map tab once saved');
 }
 document.getElementById('supplier-coords-apply').addEventListener('click', applyCoordsHelper);
 // Enter in this field should build the link, not submit the whole supplier form.
@@ -864,7 +965,8 @@ document.getElementById('supplier-form').addEventListener('submit', async (event
     if (id) {
       const payload = {};
       for (const input of form.querySelectorAll('input[name]')) {
-        if (input.name !== 'id') payload[input.name] = input.value || null;
+        if (input.name === 'id') continue;
+        payload[input.name] = input.value ? (NUMERIC_FORM_FIELDS.has(input.name) ? Number(input.value) : input.value) : null;
       }
       await api('PATCH', `/api/suppliers/${id}`, payload);
     } else {
