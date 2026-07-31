@@ -666,6 +666,184 @@ function renderPlaceList() {
   }
 }
 
+// --- Live view ---
+
+const LIVE_ICON = L.divIcon({
+  className: 'live-div-icon',
+  html: '<span class="live-dot"></span>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9]
+});
+
+let liveMap = null;
+let liveMarker = null;
+let liveAccuracyCircle = null;
+let livePolyline = null;
+let liveWatchId = null;
+let liveTracking = false;
+let liveFollow = true;
+let liveLastFix = null; // { lat, lng, accuracy, speed }
+let livePath = [];
+let liveDistanceMeters = 0;
+
+function setLiveStatus(message, isError) {
+  const status = document.getElementById('live-status');
+  status.textContent = message;
+  status.classList.toggle('error', Boolean(isError));
+}
+
+function formatDistance(meters) {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`;
+}
+
+function updateLiveStatusText() {
+  if (!liveLastFix) return;
+  const { lat, lng, accuracy, speed } = liveLastFix;
+  const parts = [`${lat.toFixed(5)}, ${lng.toFixed(5)}`, `±${Math.round(accuracy)}m`];
+  if (typeof speed === 'number' && speed >= 0) parts.push(`${(speed * 3.6).toFixed(1)} km/h`);
+  if (liveDistanceMeters > 0) parts.push(`${formatDistance(liveDistanceMeters)} traced`);
+  setLiveStatus(parts.join(' · '), false);
+}
+
+function setLiveFollow(follow) {
+  liveFollow = follow;
+  document.getElementById('live-follow-toggle').textContent = follow ? 'Following' : 'Follow';
+}
+
+function ensureLiveMap() {
+  if (liveMap) return;
+  liveMap = L.map(document.getElementById('live-map')).setView([20, 0], 2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(liveMap);
+  livePolyline = L.polyline([], { color: '#2f7dd6', weight: 4, opacity: 0.85 }).addTo(liveMap);
+  // Only a real user drag should turn off auto-follow — setView() calls we make ourselves to
+  // recenter the map don't fire 'dragstart', so this doesn't fight our own recentering.
+  liveMap.on('dragstart', () => setLiveFollow(false));
+}
+
+function renderLive() {
+  ensureLiveMap();
+  requestAnimationFrame(() => {
+    liveMap.invalidateSize();
+    if (liveLastFix && liveFollow) {
+      liveMap.setView([liveLastFix.lat, liveLastFix.lng], Math.max(liveMap.getZoom(), 16));
+    } else if (!liveLastFix) {
+      liveMap.setView([20, 0], 2);
+    }
+  });
+}
+
+function handleLivePosition(position) {
+  const { latitude: lat, longitude: lng, accuracy, speed } = position.coords;
+  ensureLiveMap();
+
+  if (liveLastFix) {
+    liveDistanceMeters += L.latLng(liveLastFix.lat, liveLastFix.lng).distanceTo([lat, lng]);
+  }
+  liveLastFix = { lat, lng, accuracy, speed };
+  livePath.push([lat, lng]);
+  livePolyline.setLatLngs(livePath);
+
+  if (!liveMarker) {
+    liveMarker = L.marker([lat, lng], { icon: LIVE_ICON, zIndexOffset: 1000 }).addTo(liveMap);
+  } else {
+    liveMarker.setLatLng([lat, lng]);
+  }
+
+  if (!liveAccuracyCircle) {
+    liveAccuracyCircle = L.circle([lat, lng], { radius: accuracy, color: '#2f7dd6', weight: 1, fillOpacity: 0.08 }).addTo(liveMap);
+  } else {
+    liveAccuracyCircle.setLatLng([lat, lng]).setRadius(accuracy);
+  }
+
+  if (liveFollow) {
+    liveMap.setView([lat, lng], Math.max(liveMap.getZoom(), 16));
+  }
+
+  updateLiveStatusText();
+}
+
+function handleLiveError(error) {
+  const messages = {
+    1: 'Location permission denied — allow location access to trace your route.',
+    2: 'Location unavailable — check GPS/network and try again.',
+    3: 'Location request timed out — try again.'
+  };
+  setLiveStatus(messages[error.code] || `Location error: ${error.message}`, true);
+  if (error.code === 1) stopLiveTracking();
+}
+
+// The packaged Android app serves TripTrack over plain HTTP, and Chromium (which powers the
+// WebView) refuses navigator.geolocation on anything but a secure origin (HTTPS or localhost) —
+// so on-device it would silently fail permission with no prompt ever shown. MainActivity injects
+// window.AndroidLocation as a way around that, talking to Android's LocationManager directly
+// instead of going through the browser API. Plain desktop/mobile browsers (this app also runs as
+// a normal web page) don't have that bridge, so they fall back to navigator.geolocation as before.
+const NATIVE_LOCATION = typeof window.AndroidLocation === 'object' && window.AndroidLocation !== null;
+
+window.__triptrackOnLocation = function (lat, lng, accuracy, speed) {
+  handleLivePosition({ coords: { latitude: lat, longitude: lng, accuracy, speed } });
+};
+
+window.__triptrackOnLocationError = function (code, message) {
+  setLiveStatus(message, true);
+  if (code === 'denied') stopLiveTracking();
+};
+
+function startLiveTracking() {
+  if (!NATIVE_LOCATION && !navigator.geolocation) {
+    setLiveStatus('Geolocation is not available in this browser.', true);
+    return;
+  }
+  ensureLiveMap();
+  liveTracking = true;
+  const button = document.getElementById('live-track-button');
+  button.textContent = 'Stop tracking';
+  button.classList.add('tracking');
+  setLiveStatus('Locating…', false);
+  if (NATIVE_LOCATION) {
+    window.AndroidLocation.startTracking();
+    return;
+  }
+  liveWatchId = navigator.geolocation.watchPosition(handleLivePosition, handleLiveError, {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 20000
+  });
+}
+
+function stopLiveTracking() {
+  if (NATIVE_LOCATION) {
+    window.AndroidLocation.stopTracking();
+  } else if (liveWatchId !== null) {
+    navigator.geolocation.clearWatch(liveWatchId);
+  }
+  liveWatchId = null;
+  liveTracking = false;
+  const button = document.getElementById('live-track-button');
+  button.textContent = 'Start tracking';
+  button.classList.remove('tracking');
+}
+
+function centerOnMe() {
+  if (!liveLastFix) {
+    setLiveStatus('No location yet — start tracking first.', true);
+    return;
+  }
+  ensureLiveMap();
+  setLiveFollow(true);
+  liveMap.setView([liveLastFix.lat, liveLastFix.lng], Math.max(liveMap.getZoom(), 16));
+}
+
+function clearLiveTrail() {
+  livePath = liveLastFix ? [[liveLastFix.lat, liveLastFix.lng]] : [];
+  liveDistanceMeters = 0;
+  if (livePolyline) livePolyline.setLatLngs(livePath);
+  updateLiveStatusText();
+}
+
 // --- Schedule view ---
 
 function supplierName(id) {
@@ -876,6 +1054,7 @@ function activateView(name) {
   if (name === 'schedule') renderSchedule().catch((error) => toast(error.message));
   if (name === 'admin') renderUsers().catch((error) => toast(error.message));
   if (name === 'map') renderMap().catch((error) => toast(error.message));
+  if (name === 'live') renderLive();
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -931,6 +1110,14 @@ document.getElementById('map-region').addEventListener('change', (event) => {
   state.mapRegion = event.currentTarget.value;
   renderMap().catch((error) => toast(error.message));
 });
+
+document.getElementById('live-track-button').addEventListener('click', () => {
+  if (liveTracking) stopLiveTracking();
+  else startLiveTracking();
+});
+document.getElementById('live-center-button').addEventListener('click', centerOnMe);
+document.getElementById('live-clear-button').addEventListener('click', clearLiveTrail);
+document.getElementById('live-follow-toggle').addEventListener('click', () => setLiveFollow(!liveFollow));
 
 document.getElementById('sync-button').addEventListener('click', runSyncNow);
 

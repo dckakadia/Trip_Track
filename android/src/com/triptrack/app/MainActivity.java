@@ -1,12 +1,20 @@
 package com.triptrack.app;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Looper;
 import android.os.Message;
+import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -15,6 +23,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
   // Default: the public address of the TripTrack server (router forwards 3600
@@ -30,10 +39,102 @@ public class MainActivity extends Activity {
   // to that page, so the blast radius stops at whatever the user types into it).
   private static final String DEFAULT_SERVER_URL = "http://116.74.77.22:3600";
   private static final int FILE_CHOOSER_REQUEST_CODE = 51426;
+  private static final int LOCATION_PERMISSION_REQUEST_CODE = 51427;
 
   private WebView webView;
   private String serverUrl;
   private ValueCallback<Uri[]> filePathCallback;
+  // Held between onGeolocationPermissionsShowPrompt (the web page asking for location) and
+  // onRequestPermissionsResult (the Android runtime-permission dialog) — the WebView callback
+  // has to be answered from whichever of those finishes second.
+  private GeolocationPermissions.Callback pendingGeoCallback;
+  private String pendingGeoOrigin;
+  // Set while LocationBridge.startTracking() is waiting on the runtime-permission dialog, so
+  // onRequestPermissionsResult knows to actually start the location updates once it resolves.
+  private boolean pendingLocationStart;
+  private LocationManager locationManager;
+
+  // navigator.geolocation is blocked by Chromium on insecure origins (WebView is Chromium-based),
+  // and the deployed TripTrack server is plain HTTP, not HTTPS — so the Live tab's route tracing
+  // can never use the browser Geolocation API in the packaged app. This bridge hands the WebView
+  // page JS a direct line to Android's own LocationManager instead, sidestepping that restriction
+  // entirely (app.js calls window.AndroidLocation.* when it detects this bridge, and falls back to
+  // navigator.geolocation when running in a plain desktop browser where the bridge doesn't exist).
+  private final LocationListener locationListener = new LocationListener() {
+    @Override
+    public void onLocationChanged(Location location) {
+      String speed = location.hasSpeed() ? String.valueOf(location.getSpeed()) : "null";
+      evaluateJs("window.__triptrackOnLocation && window.__triptrackOnLocation(" + location.getLatitude() + ","
+          + location.getLongitude() + "," + location.getAccuracy() + "," + speed + ")");
+    }
+
+    @Override
+    public void onProviderDisabled(String provider) {
+      notifyLocationError("unavailable", "Location provider disabled — turn on location services.");
+    }
+
+    @Override
+    public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+    @Override
+    public void onProviderEnabled(String provider) {}
+  };
+
+  private class LocationBridge {
+    @JavascriptInterface
+    public void startTracking() {
+      runOnUiThread(new Runnable() {
+        public void run() {
+          beginLocationUpdates();
+        }
+      });
+    }
+
+    @JavascriptInterface
+    public void stopTracking() {
+      runOnUiThread(new Runnable() {
+        public void run() {
+          if (locationManager != null) {
+            locationManager.removeUpdates(locationListener);
+          }
+        }
+      });
+    }
+  }
+
+  private void evaluateJs(String script) {
+    webView.evaluateJavascript(script, null);
+  }
+
+  private void notifyLocationError(String code, String message) {
+    evaluateJs("window.__triptrackOnLocationError && window.__triptrackOnLocationError("
+        + JSONObject.quote(code) + "," + JSONObject.quote(message) + ")");
+  }
+
+  private void beginLocationUpdates() {
+    if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+      pendingLocationStart = true;
+      requestPermissions(new String[] { Manifest.permission.ACCESS_FINE_LOCATION }, LOCATION_PERMISSION_REQUEST_CODE);
+      return;
+    }
+    locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+    boolean gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+    boolean networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+    if (!gpsEnabled && !networkEnabled) {
+      notifyLocationError("unavailable", "Turn on location services to trace your route.");
+      return;
+    }
+    try {
+      if (gpsEnabled) {
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000, 2, locationListener, Looper.getMainLooper());
+      }
+      if (networkEnabled) {
+        locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000, 2, locationListener, Looper.getMainLooper());
+      }
+    } catch (SecurityException e) {
+      notifyLocationError("denied", "Location permission denied — allow location access to trace your route.");
+    }
+  }
 
   private static boolean isHttpUrl(String url) {
     if (url == null) {
@@ -58,6 +159,10 @@ public class MainActivity extends Activity {
     // WebView drops that silently unless multi-window support + onCreateWindow are wired up.
     settings.setSupportMultipleWindows(true);
     settings.setJavaScriptCanOpenWindowsAutomatically(true);
+    // Kept for completeness (see onGeolocationPermissionsShowPrompt below), though the Live tab
+    // itself talks to AndroidLocation, not navigator.geolocation — see the bridge's own comment.
+    settings.setGeolocationEnabled(true);
+    webView.addJavascriptInterface(new LocationBridge(), "AndroidLocation");
     webView.setWebViewClient(new WebViewClient() {
       @Override
       public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -77,6 +182,21 @@ public class MainActivity extends Activity {
     // confirm() for delete buttons (suppliers, users), so those would silently
     // no-op in the packaged app without this.
     webView.setWebChromeClient(new WebChromeClient() {
+      // The Live tab's navigator.geolocation.watchPosition() surfaces here instead of a
+      // browser-style permission popup. Grant it immediately if the OS-level runtime permission
+      // is already held; otherwise ask for that first and answer this callback from whichever
+      // of onRequestPermissionsResult / this method runs second.
+      @Override
+      public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+          callback.invoke(origin, true, false);
+          return;
+        }
+        pendingGeoCallback = callback;
+        pendingGeoOrigin = origin;
+        requestPermissions(new String[] { Manifest.permission.ACCESS_FINE_LOCATION }, LOCATION_PERMISSION_REQUEST_CODE);
+      }
+
       @Override
       public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
         new AlertDialog.Builder(MainActivity.this)
@@ -176,6 +296,28 @@ public class MainActivity extends Activity {
       return;
     }
     super.onActivityResult(requestCode, resultCode, data);
+  }
+
+  @Override
+  public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+      boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+      if (pendingGeoCallback != null) {
+        pendingGeoCallback.invoke(pendingGeoOrigin, granted, false);
+        pendingGeoCallback = null;
+        pendingGeoOrigin = null;
+      }
+      if (pendingLocationStart) {
+        pendingLocationStart = false;
+        if (granted) {
+          beginLocationUpdates();
+        } else {
+          notifyLocationError("denied", "Location permission denied — allow location access to trace your route.");
+        }
+      }
+      return;
+    }
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults);
   }
 
   @Override

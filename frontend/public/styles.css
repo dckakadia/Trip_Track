@@ -284,6 +284,33 @@ button[type="submit"], #sync-button {
    the round marker above renders on its own instead of inside a second, mismatched box. */
 .place-div-icon { background: none; border: none; }
 
+.live-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.7rem; }
+
+#live-track-button {
+  background: #14324f;
+  color: #fff;
+  border-color: #14324f;
+  font-weight: 600;
+}
+
+#live-track-button.tracking { background: #c0392b; border-color: #c0392b; }
+
+.outline-button { background: #fff; color: #14324f; border-color: #c7ccd4; }
+
+#live-status.error { color: #c0392b; }
+
+.live-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2f7dd6;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 3px rgba(47, 125, 214, 0.35), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.live-div-icon { background: none; border: none; }
+
 .day-bar {
   display: flex;
   align-items: center;

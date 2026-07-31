@@ -43,6 +43,7 @@
     <button class="tab" data-view="schedule" type="button"><span class="tab-icon">📅</span><span>Schedule</span></button>
     <button class="tab" data-view="suppliers" type="button"><span class="tab-icon">🏭</span><span>Suppliers</span></button>
     <button class="tab" data-view="map" type="button"><span class="tab-icon">🗺️</span><span>Map</span></button>
+    <button class="tab" data-view="live" type="button"><span class="tab-icon">📍</span><span>Live</span></button>
     <button class="tab" data-view="trips" type="button"><span class="tab-icon">🧳</span><span>Trips</span></button>
     <button class="tab" data-view="admin" type="button"><span class="tab-icon">⚙️</span><span>Admin</span></button>
   </nav>
@@ -180,6 +181,21 @@
         <button type="button" id="place-form-cancel" class="hidden">Cancel edit</button>
       </form>
       <div id="place-list"></div>
+    </section>
+
+    <!-- ===== Live ===== -->
+    <section id="view-live" class="view hidden">
+      <div class="section-head">
+        <h3>Live location</h3>
+        <button class="add-toggle" id="live-follow-toggle" type="button">Following</button>
+      </div>
+      <p id="live-status" class="muted">Tap "Start tracking" to find your location and trace your route.</p>
+      <div id="live-map" class="supplier-map live-map"></div>
+      <div class="live-controls">
+        <button id="live-track-button" type="button">Start tracking</button>
+        <button id="live-center-button" class="outline-button" type="button">Center on me</button>
+        <button id="live-clear-button" class="outline-button" type="button">Clear trail</button>
+      </div>
     </section>
 
     <!-- ===== Trips ===== -->
