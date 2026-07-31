@@ -251,6 +251,39 @@ button[type="submit"], #sync-button {
 .supplier-map .leaflet-popup-content .muted { color: #7a8391; }
 .supplier-map .leaflet-popup-content a { color: #14324f; }
 
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin: 0.6rem 0;
+  font-size: 0.8rem;
+  color: #5a6472;
+}
+
+.map-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+.place-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  font-size: 0.95rem;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  border: 2px solid #fff;
+}
+
+.place-marker-airport { background: #2f7dd6; }
+.place-marker-railway_station { background: #c0392b; }
+.place-marker-bus_station { background: #147a45; }
+.place-marker-hotel { background: #9b59b6; }
+
+/* Leaflet wraps divIcon html in an element with its own default sizing/background — reset it so
+   the round marker above renders on its own instead of inside a second, mismatched box. */
+.place-div-icon { background: none; border: none; }
+
 .day-bar {
   display: flex;
   align-items: center;

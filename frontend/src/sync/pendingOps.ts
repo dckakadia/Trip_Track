@@ -11,7 +11,7 @@ export interface PendingOpRecord {
   created_at: string;
 }
 
-export const SYNCED_TABLES = ['trips', 'cities', 'suppliers', 'visits', 'samples', 'photos', 'users'] as const;
+export const SYNCED_TABLES = ['trips', 'cities', 'suppliers', 'places', 'visits', 'samples', 'photos', 'users'] as const;
 export type SyncedTable = (typeof SYNCED_TABLES)[number];
 
 function assertSyncedTable(tableName: string): asserts tableName is SyncedTable {

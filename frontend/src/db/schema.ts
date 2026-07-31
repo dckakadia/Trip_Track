@@ -48,6 +48,18 @@ export interface SupplierRecord extends BaseRecord {
   notes: string | null;
 }
 
+export type PlaceType = 'airport' | 'railway_station' | 'bus_station' | 'hotel';
+
+export interface PlaceRecord extends BaseRecord {
+  name: string;
+  type: PlaceType;
+  address: string | null;
+  map_url: string | null;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  notes: string | null;
+}
+
 export type VisitStatus = 'PLANNED' | 'CONFIRMED' | 'DONE' | 'CANCELLED';
 
 export interface VisitRecord extends BaseRecord {
@@ -158,6 +170,19 @@ export const SCHEMA_STATEMENTS = [
     deleted INTEGER DEFAULT 0,
     synced INTEGER DEFAULT 0
   )`,
+  `CREATE TABLE IF NOT EXISTS places (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    address TEXT,
+    map_url TEXT,
+    gps_lat REAL,
+    gps_lng REAL,
+    notes TEXT,
+    updated_at TEXT,
+    deleted INTEGER DEFAULT 0,
+    synced INTEGER DEFAULT 0
+  )`,
   `CREATE TABLE IF NOT EXISTS visits (
     id TEXT PRIMARY KEY,
     trip_id TEXT NOT NULL,
@@ -246,6 +271,7 @@ export const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_trips_synced ON trips (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_cities_synced ON cities (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_suppliers_synced ON suppliers (synced)`,
+  `CREATE INDEX IF NOT EXISTS idx_places_synced ON places (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_synced ON visits (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_samples_synced ON samples (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_photos_synced ON photos (synced)`,

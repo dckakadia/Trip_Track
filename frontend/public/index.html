@@ -145,6 +145,41 @@
       </div>
       <p id="map-summary" class="muted"></p>
       <div id="supplier-map" class="supplier-map"></div>
+      <div class="map-legend">
+        <span class="map-legend-item"><span class="place-marker place-marker-airport">✈️</span>Airport</span>
+        <span class="map-legend-item"><span class="place-marker place-marker-railway_station">🚆</span>Railway station</span>
+        <span class="map-legend-item"><span class="place-marker place-marker-bus_station">🚌</span>Bus station</span>
+        <span class="map-legend-item"><span class="place-marker place-marker-hotel">🏨</span>Hotel</span>
+      </div>
+
+      <div class="section-head">
+        <h3 id="place-count">Places</h3>
+        <button class="add-toggle" data-target="place-form" type="button">+ Add place</button>
+      </div>
+      <form id="place-form" class="card form-grid hidden">
+        <h2 id="place-form-title">New place</h2>
+        <input type="hidden" name="id" />
+        <input name="name" placeholder="Place name (e.g. Baiyun Airport)" required />
+        <select name="type" required>
+          <option value="airport">✈️ Airport</option>
+          <option value="railway_station">🚆 Railway station</option>
+          <option value="bus_station">🚌 Bus station</option>
+          <option value="hotel">🏨 Hotel</option>
+        </select>
+        <input name="address" placeholder="Address" />
+        <div class="coords-helper">
+          <input id="place-coords-input" type="text" placeholder="Or paste GPS coordinates (e.g. from phone GPS, Apple Maps, WeChat, Amap) — no Google Maps needed" />
+          <button type="button" id="place-coords-apply" class="file-button outline">Build map link</button>
+        </div>
+        <p id="place-coords-status" class="coords-status"></p>
+        <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
+        <input type="hidden" name="gps_lat" />
+        <input type="hidden" name="gps_lng" />
+        <input name="notes" placeholder="Notes" />
+        <button type="submit" id="place-form-submit">Add place</button>
+        <button type="button" id="place-form-cancel" class="hidden">Cancel edit</button>
+      </form>
+      <div id="place-list"></div>
     </section>
 
     <!-- ===== Trips ===== -->

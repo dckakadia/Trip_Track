@@ -5,7 +5,15 @@ const state = {
   suppliers: [],
   supplierQuery: '',
   supplierRegion: '',
-  mapRegion: ''
+  mapRegion: '',
+  places: []
+};
+
+const PLACE_TYPES = {
+  airport: { emoji: '✈️', label: 'Airport' },
+  railway_station: { emoji: '🚆', label: 'Railway station' },
+  bus_station: { emoji: '🚌', label: 'Bus station' },
+  hotel: { emoji: '🏨', label: 'Hotel' }
 };
 
 function todayIso() {
@@ -428,7 +436,7 @@ function setSupplierFormMode(supplier) {
   document.getElementById('supplier-form-submit').textContent = supplier ? 'Save changes' : 'Add supplier';
   document.getElementById('supplier-form-cancel').classList.toggle('hidden', !supplier);
   document.getElementById('supplier-coords-input').value = '';
-  setCoordsStatus('', false);
+  setCoordsStatus('supplier-coords-status', '', false);
   if (supplier) {
     for (const input of form.querySelectorAll('input[name]')) {
       if (input.name !== 'id') input.value = supplier[input.name] ?? '';
@@ -480,13 +488,14 @@ L.Icon.Default.mergeOptions({
 let supplierMap = null;
 let supplierMapMarkers = null;
 
-// gps_lat/gps_lng (set by the coordinates helper on the supplier form) win; suppliers saved
-// before that existed, or imported with only a map link, fall back to parsing one out of it.
-function supplierLocation(supplier) {
-  if (typeof supplier.gps_lat === 'number' && typeof supplier.gps_lng === 'number') {
-    return { lat: supplier.gps_lat, lng: supplier.gps_lng };
+// gps_lat/gps_lng (set by the coordinates helper on the form) win; records saved before that
+// existed, or imported with only a map link, fall back to parsing one out of it. Works for both
+// suppliers and places — both carry the same gps_lat/gps_lng/map_url columns.
+function entityLocation(entity) {
+  if (typeof entity.gps_lat === 'number' && typeof entity.gps_lng === 'number') {
+    return { lat: entity.gps_lat, lng: entity.gps_lng };
   }
-  return parseCoordinates(supplier.map_url || '');
+  return parseCoordinates(entity.map_url || '');
 }
 
 function supplierPopup(supplier, loc) {
@@ -504,7 +513,34 @@ function supplierPopup(supplier, loc) {
   return box;
 }
 
-function renderMap() {
+function placeIcon(type) {
+  const meta = PLACE_TYPES[type] || { emoji: '📍', label: 'Place' };
+  return L.divIcon({
+    className: 'place-div-icon',
+    html: `<span class="place-marker place-marker-${type}">${meta.emoji}</span>`,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -13]
+  });
+}
+
+function placePopup(place, loc) {
+  const meta = PLACE_TYPES[place.type] || { emoji: '📍', label: 'Place' };
+  const box = el('div');
+  box.append(el('b', null, `${meta.emoji} ${place.name}`));
+  box.append(el('div', 'muted', meta.label));
+  if (place.address) box.append(el('div', 'muted', place.address));
+  const linkRow = el('div');
+  const link = el('a', null, 'Open in Maps →');
+  link.href = place.map_url || `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  linkRow.append(link);
+  box.append(linkRow);
+  return box;
+}
+
+async function renderMap() {
   const container = document.getElementById('supplier-map');
   if (!supplierMap) {
     supplierMap = L.map(container);
@@ -514,6 +550,9 @@ function renderMap() {
     }).addTo(supplierMap);
     supplierMapMarkers = L.layerGroup().addTo(supplierMap);
   }
+
+  state.places = await api('GET', '/api/places');
+  renderPlaceList();
 
   const regionSelect = document.getElementById('map-region');
   const current = state.mapRegion;
@@ -533,18 +572,29 @@ function renderMap() {
   supplierMapMarkers.clearLayers();
   const points = [];
   for (const supplier of filtered) {
-    const loc = supplierLocation(supplier);
+    const loc = entityLocation(supplier);
     if (!loc) continue;
     points.push([loc.lat, loc.lng]);
     L.marker([loc.lat, loc.lng]).bindPopup(supplierPopup(supplier, loc)).addTo(supplierMapMarkers);
   }
+  const suppliersPlotted = points.length;
 
-  const missing = filtered.length - points.length;
+  let placesPlotted = 0;
+  for (const place of state.places) {
+    const loc = entityLocation(place);
+    if (!loc) continue;
+    placesPlotted += 1;
+    points.push([loc.lat, loc.lng]);
+    L.marker([loc.lat, loc.lng], { icon: placeIcon(place.type) }).bindPopup(placePopup(place, loc)).addTo(supplierMapMarkers);
+  }
+
+  const missing = filtered.length - suppliersPlotted;
   const summary = document.getElementById('map-summary');
   summary.textContent = points.length === 0
     ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates, and hit "Build map link".'
-    : `${points.length} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
-      (missing > 0 ? ` · ${missing} missing a location` : '');
+    : `${suppliersPlotted} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
+      (missing > 0 ? ` · ${missing} missing a location` : '') +
+      (placesPlotted > 0 ? ` · ${placesPlotted} place${placesPlotted === 1 ? '' : 's'}` : '');
 
   // The container is display:none until this tab is opened, so Leaflet computed zero size
   // when the map was first created — invalidateSize() makes it re-measure now that it's visible.
@@ -556,6 +606,64 @@ function renderMap() {
       supplierMap.setView([20, 0], 2);
     }
   });
+}
+
+function setPlaceFormMode(place) {
+  const form = document.getElementById('place-form');
+  form.querySelector('input[name="id"]').value = place ? place.id : '';
+  document.getElementById('place-form-title').textContent = place ? `Edit ${place.name}` : 'New place';
+  document.getElementById('place-form-submit').textContent = place ? 'Save changes' : 'Add place';
+  document.getElementById('place-form-cancel').classList.toggle('hidden', !place);
+  document.getElementById('place-coords-input').value = '';
+  setCoordsStatus('place-coords-status', '', false);
+  if (place) {
+    for (const input of form.querySelectorAll('input[name], select[name]')) {
+      if (input.name !== 'id') input.value = place[input.name] ?? '';
+    }
+    form.classList.remove('hidden');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    form.reset();
+  }
+}
+
+function renderPlaceList() {
+  document.getElementById('place-count').textContent = `Places (${state.places.length})`;
+
+  const list = document.getElementById('place-list');
+  list.replaceChildren();
+  if (state.places.length === 0) {
+    list.append(el('p', 'muted', 'No places yet — add airports, stations, or hotels so they show on the map.'));
+  }
+  for (const place of state.places) {
+    const meta = PLACE_TYPES[place.type] || { emoji: '📍', label: 'Place' };
+    const item = el('div', 'item');
+    const left = el('div');
+    left.append(el('div', 'title', `${meta.emoji} ${place.name}`));
+    left.append(el('div', 'sub', [meta.label, place.address].filter(Boolean).join(' · ')));
+    item.append(left);
+
+    const actions = el('div', 'head-actions');
+    actions.append(mapLink({ ...place, address_en: place.address }));
+    const editButton = el('button', 'map-link', '✏️ Edit');
+    editButton.type = 'button';
+    editButton.addEventListener('click', () => setPlaceFormMode(place));
+    const deleteButton = el('button', 'map-link danger', '🗑 Delete');
+    deleteButton.type = 'button';
+    deleteButton.addEventListener('click', async () => {
+      if (!confirm(`Delete place "${place.name}"?`)) return;
+      try {
+        await api('DELETE', `/api/places/${place.id}`);
+        await renderMap();
+        refreshSyncStatus().catch(() => {});
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    actions.append(editButton, deleteButton);
+    item.append(actions);
+    list.append(item);
+  }
 }
 
 // --- Schedule view ---
@@ -767,7 +875,7 @@ function activateView(name) {
   if (name === 'today') renderToday().catch((error) => toast(error.message));
   if (name === 'schedule') renderSchedule().catch((error) => toast(error.message));
   if (name === 'admin') renderUsers().catch((error) => toast(error.message));
-  if (name === 'map') renderMap();
+  if (name === 'map') renderMap().catch((error) => toast(error.message));
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -779,6 +887,7 @@ document.querySelectorAll('.add-toggle[data-target]').forEach((button) => {
     if (button.dataset.target === 'supplier-form') setSupplierFormMode(null);
     if (button.dataset.target === 'trip-form') setTripFormMode(null);
     if (button.dataset.target === 'city-form') setCityFormMode(null);
+    if (button.dataset.target === 'place-form') setPlaceFormMode(null);
     document.getElementById(button.dataset.target).classList.toggle('hidden');
   });
 });
@@ -820,7 +929,7 @@ document.getElementById('supplier-region').addEventListener('change', (event) =>
 });
 document.getElementById('map-region').addEventListener('change', (event) => {
   state.mapRegion = event.currentTarget.value;
-  renderMap();
+  renderMap().catch((error) => toast(error.message));
 });
 
 document.getElementById('sync-button').addEventListener('click', runSyncNow);
@@ -948,40 +1057,49 @@ function parseCoordinates(text) {
   return null;
 }
 
-function setCoordsStatus(message, isError) {
-  const status = document.getElementById('supplier-coords-status');
+function setCoordsStatus(statusId, message, isError) {
+  const status = document.getElementById(statusId);
   status.textContent = message;
   status.classList.toggle('error', Boolean(isError));
 }
 
-function applyCoordsHelper() {
-  const input = document.getElementById('supplier-coords-input');
-  const coords = parseCoordinates(input.value);
-  if (!coords) {
-    // Shown inline next to the button, not just via the header toast — that toast is easy to
-    // miss when this button is scrolled far down a long form (which it usually is).
-    setCoordsStatus(
-      input.value.trim() ? `Could not find coordinates like "31.23, 121.47" in "${input.value.trim()}"` : 'Paste coordinates first',
-      true
-    );
-    return;
-  }
-  const form = document.getElementById('supplier-form');
-  form.querySelector('input[name="map_url"]').value = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
-  form.querySelector('input[name="gps_lat"]').value = coords.lat;
-  form.querySelector('input[name="gps_lng"]').value = coords.lng;
-  input.value = '';
-  setCoordsStatus(`✓ Map link built from ${coords.lat}, ${coords.lng} — save the form to keep it`, false);
-  toast('Map link built — will also show on the Map tab once saved');
+// Shared by the supplier form and the place form: builds a Google Maps link from pasted
+// coordinates, so a location can be mapped from any GPS source (phone GPS, Apple Maps, WeChat
+// share, Amap, Baidu) without needing Google Maps itself to load — useful where Google Maps is
+// blocked (e.g. mainland China).
+function wireCoordsHelper(formId, inputId, buttonId, statusId) {
+  const apply = () => {
+    const input = document.getElementById(inputId);
+    const coords = parseCoordinates(input.value);
+    if (!coords) {
+      // Shown inline next to the button, not just via the header toast — that toast is easy to
+      // miss when this button is scrolled far down a long form (which it usually is).
+      setCoordsStatus(
+        statusId,
+        input.value.trim() ? `Could not find coordinates like "31.23, 121.47" in "${input.value.trim()}"` : 'Paste coordinates first',
+        true
+      );
+      return;
+    }
+    const form = document.getElementById(formId);
+    form.querySelector('input[name="map_url"]').value = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+    form.querySelector('input[name="gps_lat"]').value = coords.lat;
+    form.querySelector('input[name="gps_lng"]').value = coords.lng;
+    input.value = '';
+    setCoordsStatus(statusId, `✓ Map link built from ${coords.lat}, ${coords.lng} — save the form to keep it`, false);
+    toast('Map link built — will also show on the Map tab once saved');
+  };
+  document.getElementById(buttonId).addEventListener('click', apply);
+  // Enter in this field should build the link, not submit the whole form.
+  document.getElementById(inputId).addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      apply();
+    }
+  });
 }
-document.getElementById('supplier-coords-apply').addEventListener('click', applyCoordsHelper);
-// Enter in this field should build the link, not submit the whole supplier form.
-document.getElementById('supplier-coords-input').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    applyCoordsHelper();
-  }
-});
+wireCoordsHelper('supplier-form', 'supplier-coords-input', 'supplier-coords-apply', 'supplier-coords-status');
+wireCoordsHelper('place-form', 'place-coords-input', 'place-coords-apply', 'place-coords-status');
 
 document.getElementById('supplier-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1009,6 +1127,35 @@ document.getElementById('supplier-form').addEventListener('submit', async (event
 document.getElementById('supplier-form-cancel').addEventListener('click', () => {
   setSupplierFormMode(null);
   document.getElementById('supplier-form').classList.add('hidden');
+});
+
+// Place form creates or, when an id is set via Edit, updates in place.
+document.getElementById('place-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = form.querySelector('input[name="id"]').value;
+  try {
+    if (id) {
+      const payload = {};
+      for (const input of form.querySelectorAll('input[name], select[name]')) {
+        if (input.name === 'id') continue;
+        payload[input.name] = input.value ? (NUMERIC_FORM_FIELDS.has(input.name) ? Number(input.value) : input.value) : null;
+      }
+      await api('PATCH', `/api/places/${id}`, payload);
+    } else {
+      await api('POST', '/api/places', formValues(form));
+    }
+    setPlaceFormMode(null);
+    form.classList.add('hidden');
+    await renderMap();
+    refreshSyncStatus().catch(() => {});
+  } catch (error) {
+    toast(error.message);
+  }
+});
+document.getElementById('place-form-cancel').addEventListener('click', () => {
+  setPlaceFormMode(null);
+  document.getElementById('place-form').classList.add('hidden');
 });
 
 // --- Auth ---

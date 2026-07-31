@@ -84,6 +84,22 @@ test('app server exposes the full workflow over its JSON API', async () => {
     const suppliers = await api(base, 'GET', '/api/suppliers');
     assert.equal(suppliers.data.length, 1);
 
+    // Places (airports, stations, hotels).
+    const place = await api(base, 'POST', '/api/places', {
+      name: 'API Airport',
+      type: 'airport',
+      gps_lat: 23.392437,
+      gps_lng: 113.298786
+    });
+    assert.equal(place.status, 201);
+    const places = await api(base, 'GET', '/api/places');
+    assert.equal(places.data.length, 1);
+    assert.equal(places.data[0].type, 'airport');
+    const placeUpdated = await api(base, 'PATCH', `/api/places/${place.data.id}`, { notes: 'Curbside pickup at Terminal 2' });
+    assert.equal(placeUpdated.data.notes, 'Curbside pickup at Terminal 2');
+    const placeDeleted = await api(base, 'DELETE', `/api/places/${place.data.id}`);
+    assert.equal(placeDeleted.data.deleted, 1);
+
     // Visits and status flow.
     const visit = await api(base, 'POST', '/api/visits', {
       trip_id: tripId,

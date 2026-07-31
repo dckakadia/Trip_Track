@@ -12,6 +12,7 @@ import {
   softDeleteSupplier,
   updateSupplier
 } from '../repositories/supplierRepository.ts';
+import { createPlace, listPlaces, softDeletePlace, updatePlace } from '../repositories/placeRepository.ts';
 import {
   createVisit,
   listVisitsByDate,
@@ -276,6 +277,27 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   }
   if (supplierMatch && method === 'DELETE') {
     sendJson(res, 200, await softDeleteSupplier(supplierMatch[1]!));
+    return true;
+  }
+
+  // --- Places (airports, stations, hotels — reference pins for the map) ---
+  if (pathname === '/api/places' && method === 'GET') {
+    sendJson(res, 200, await listPlaces());
+    return true;
+  }
+  if (pathname === '/api/places' && method === 'POST') {
+    const body = await readJsonBody(req);
+    const id = await createPlace(body as Parameters<typeof createPlace>[0]);
+    sendJson(res, 201, { id });
+    return true;
+  }
+  const placeMatch = pathname.match(/^\/api\/places\/([^/]+)$/);
+  if (placeMatch && method === 'PATCH') {
+    sendJson(res, 200, await updatePlace(placeMatch[1]!, await readJsonBody(req)));
+    return true;
+  }
+  if (placeMatch && method === 'DELETE') {
+    sendJson(res, 200, await softDeletePlace(placeMatch[1]!));
     return true;
   }
 
