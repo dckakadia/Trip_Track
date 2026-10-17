@@ -27,7 +27,7 @@ test('geocode and Baidu key endpoints respect auth and never expose the key', as
     assert.deepEqual((await call(base, 'GET', '/api/admin/baidu-ak', undefined, admin)).data, { configured: false, source: null, masked: null });
     const notSetUp = await call(base, 'POST', '/api/geocode', { query: '永芳印刷 江阴市锡澄路' }, member);
     assert.equal(notSetUp.status, 400);
-    assert.match(notSetUp.data.error, /Admin page/);
+    assert.match(notSetUp.data.error, /Amap \(高德地图\) → Share → Copy link/);
 
     // Only admins can manage the key; it is validated and only ever shown masked.
     assert.equal((await call(base, 'PUT', '/api/admin/baidu-ak', { ak: 'abcd1234efgh5678' }, member)).status, 403);

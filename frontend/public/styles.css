@@ -566,3 +566,4 @@ button.shortlist-toggle:disabled { opacity: 0.45; cursor: default; }
 
 .baidu-ak-form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .baidu-ak-form input { flex: 1 1 14rem; min-width: 0; }
+.coords-hint { grid-column: 1 / -1; margin: -0.2rem 0 0; font-size: 0.8rem; color: #7a8391; }

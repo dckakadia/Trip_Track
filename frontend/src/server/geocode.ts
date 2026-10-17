@@ -1,15 +1,20 @@
 import { getSetting } from '../repositories/settingsRepository.ts';
 
-// Turns a pasted place description — typically a WeChat "share location" card copied as text,
-// e.g. "江阴市永芳印刷有限公司(火车站路) 江阴市锡澄路辅路附近" — into GPS coordinates via Baidu Maps.
+// Turns something pasted into a supplier/place form into exact GPS coordinates:
 //
-// Baidu needs a server-side API key (AK). It's read from TRIPTRACK_BAIDU_AK, or else from the
-// local-only settings table (set on the Admin page), so it never ships to the browser or syncs.
+// 1. A map-app share link (no account or key needed). A WeChat location opens in Amap (高德),
+//    whose Share → Copy link gives a surl.amap.com short link that redirects to a URL carrying the
+//    POI's exact coordinates, name, and address. Full Baidu (map.baidu.com) and Tencent (map.qq.com)
+//    links carry coordinates in the URL too. Baidu short links (j.map.baidu.com) only resolve from
+//    inside China, so those ask the user to open the link and copy the full address instead.
+// 2. Plain text ("江阴市永芳印刷有限公司(火车站路) 江阴市锡澄路辅路附近", a WeChat location card copied
+//    as text) via Baidu place search — only when a Baidu AK is configured (TRIPTRACK_BAIDU_AK, or
+//    the local-only setting on the Admin page); Baidu requires a Chinese phone number to get one.
 //
-// Coordinates: Baidu returns GCJ-02 here (ret_coordtype=gcj02ll), China's legally mandated
-// offset datum. Raw GCJ-02 lands several hundred metres off on WGS-84 maps such as the
-// OpenStreetMap tiles the Map tab uses, so results are converted to WGS-84 for gps_lat/gps_lng.
-// The map link keeps GCJ-02 and opens in Baidu Maps, where it is exact.
+// Coordinates: Chinese maps use GCJ-02 (Amap, Tencent) or Baidu's own BD-09 / BD-09 Mercator,
+// both offset several hundred metres from WGS-84. Everything is converted to WGS-84 for
+// gps_lat/gps_lng so pins land correctly on the OpenStreetMap tiles the Map tab uses, while the
+// stored map link stays the original share link, which opens exactly in the user's map app.
 
 export const BAIDU_AK_SETTING = 'baidu_ak';
 const BAIDU_BASE = 'https://api.map.baidu.com';
@@ -113,6 +118,139 @@ export function gcj02ToWgs84(lat: number, lng: number): { lat: number; lng: numb
   return { lat: Number(wgs.lat.toFixed(6)), lng: Number(wgs.lng.toFixed(6)) };
 }
 
+// ---------- BD-09 (Baidu) → GCJ-02 ----------
+
+// Baidu's Mercator (BD-09MC, the "@X,Y" numbers in map.baidu.com URLs) → BD-09 lat/lng, using
+// the band polynomials from Baidu's own map JS; then BD-09 → GCJ-02 with the standard inverse.
+const MCBAND = [12890594.86, 8362377.87, 5591021, 3481989.83, 1678043.12, 0];
+const MC2LL = [
+  [1.410526172116255e-8, 0.00000898305509648872, -1.9939833816331, 200.9824383106796, -187.2403703815547, 91.6087516669843, -23.38765649603339, 2.57121317296198, -0.03801003308653, 17337981.2],
+  [-7.435856389565537e-9, 0.000008983055097726239, -0.78625201886289, 96.32687599759846, -1.85204757529826, -59.36935905485877, 47.40033549296737, -16.50741931063887, 2.28786674699375, 10260144.86],
+  [-3.030883460898826e-8, 0.00000898305509983578, 0.30071316287616, 59.74293618442277, 7.357984074871, -25.38371002664745, 13.45380521110908, -3.29883767235584, 0.32710905363475, 6856817.37],
+  [-1.981981304930552e-8, 0.000008983055099779535, 0.03278182852591, 40.31678527705744, 0.65659298677277, -4.44255534477492, 0.85341911805263, 0.12923347998204, -0.04625736007561, 4482777.06],
+  [3.09191371068437e-9, 0.000008983055096812155, 0.00006995724062, 23.10934304144901, -0.00023663490511, -0.6321817810242, -0.00663494467273, 0.03430082397953, -0.00466043876332, 2555164.4],
+  [2.890871144776878e-9, 0.000008983055095805407, -3.068298e-8, 7.47137025468032, -0.00000353937994, -0.02145144861037, -0.00001234426596, 0.00010322952773, -0.00000323890364, 826088.5]
+];
+
+export function bd09mcToGcj02(x: number, y: number): { lat: number; lng: number } {
+  const c = MC2LL[MCBAND.findIndex((band) => Math.abs(y) >= band)]!;
+  const bdLng = (c[0]! + c[1]! * Math.abs(x)) * Math.sign(x);
+  const t = Math.abs(y) / c[9]!;
+  const bdLat = (c[2]! + c[3]! * t + c[4]! * t ** 2 + c[5]! * t ** 3 + c[6]! * t ** 4 + c[7]! * t ** 5 + c[8]! * t ** 6) * Math.sign(y);
+  const px = bdLng - 0.0065;
+  const py = bdLat - 0.006;
+  const xPi = (Math.PI * 3000.0) / 180.0;
+  const z = Math.sqrt(px * px + py * py) - 0.00002 * Math.sin(py * xPi);
+  const theta = Math.atan2(py, px) - 0.000003 * Math.cos(px * xPi);
+  return { lat: z * Math.sin(theta), lng: z * Math.cos(theta) };
+}
+
+// ---------- Map-app share links ----------
+
+// Only these hosts are ever fetched, and only to read their redirect Location — never the
+// final page — so a pasted URL can't make the server request arbitrary/internal addresses.
+const SHORT_LINK_HOSTS = new Set(['surl.amap.com', 'j.map.baidu.com']);
+const MAX_HOPS = 5;
+
+type RedirectFetch = (url: string, init: { redirect: 'manual'; signal: AbortSignal; headers: Record<string, string> }) => Promise<{
+  status: number;
+  headers: { get(name: string): string | null };
+}>;
+
+function wgsCandidate(gcjLat: number, gcjLng: number, name: string, address: string, mapUrl: string): GeocodeCandidate {
+  const wgs = gcj02ToWgs84(gcjLat, gcjLng);
+  return { name, address, lat: wgs.lat, lng: wgs.lng, map_url: mapUrl, precision: 'place' };
+}
+
+function finite(...values: number[]): boolean {
+  return values.every((value) => Number.isFinite(value));
+}
+
+/** Parse coordinates out of a resolved Amap / Baidu / Tencent map URL. */
+export function parseMapUrl(url: URL, shareUrl: string): GeocodeCandidate | null {
+  const host = url.hostname;
+  const param = (name: string) => url.searchParams.get(name);
+
+  if (host.endsWith('amap.com')) {
+    // wb.amap.com/?p=POIID,lat,lng,name,address   (a shared place)
+    // wb.amap.com/?q=lat,lng,label                 (a shared map point)
+    // uri.amap.com/marker?position=lng,lat&name=…  (URI API)
+    const p = param('p')?.split(',');
+    if (p && p.length >= 3 && finite(Number(p[1]), Number(p[2]))) {
+      return wgsCandidate(Number(p[1]), Number(p[2]), p[3] || 'Amap location', p.slice(4).join(',') || '', shareUrl);
+    }
+    const q = param('q')?.split(',');
+    if (q && q.length >= 2 && finite(Number(q[0]), Number(q[1]))) {
+      const label = q.slice(2).join(',');
+      return wgsCandidate(Number(q[0]), Number(q[1]), label || 'Amap location', label, shareUrl);
+    }
+    const position = param('position')?.split(',');
+    if (position && position.length >= 2 && finite(Number(position[0]), Number(position[1]))) {
+      return wgsCandidate(Number(position[1]), Number(position[0]), param('name') || 'Amap location', '', shareUrl);
+    }
+  }
+
+  if (host.endsWith('map.baidu.com')) {
+    // map.baidu.com/poi/NAME/@X,Y,17z…  or  …/place/detail/…&sharegeo=X,Y  (BD-09 Mercator)
+    const decodedPath = decodeURIComponent(url.pathname + url.search);
+    const mc = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),/.exec(decodedPath) ?? /sharegeo=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(decodedPath);
+    if (mc) {
+      const gcj = bd09mcToGcj02(Number(mc[1]), Number(mc[2]));
+      const name = /\/poi\/([^/@]+)\//.exec(decodedPath)?.[1] ?? 'Baidu location';
+      return wgsCandidate(gcj.lat, gcj.lng, name, '', shareUrl);
+    }
+  }
+
+  if (host.endsWith('map.qq.com')) {
+    // map.qq.com/?pointx=lng&pointy=lat&name=…   or   apis.map.qq.com/uri/v1/marker?marker=coord:lat,lng;title:…
+    const pointx = Number(param('pointx'));
+    const pointy = Number(param('pointy'));
+    if (param('pointx') && finite(pointx, pointy)) {
+      return wgsCandidate(pointy, pointx, param('name') || 'Tencent Maps location', param('addr') || '', shareUrl);
+    }
+    const marker = /coord:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:;title:([^;]*))?(?:;addr:([^;]*))?/.exec(param('marker') ?? '');
+    if (marker) {
+      return wgsCandidate(Number(marker[1]), Number(marker[2]), marker[3] || 'Tencent Maps location', marker[4] || '', shareUrl);
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve a map-app share link to exact coordinates without any API key, following short-link
+ * redirects (Amap's surl.amap.com) by reading Location headers hop by hop.
+ */
+export async function resolveMapLink(link: string, fetchImpl: RedirectFetch = fetch as unknown as RedirectFetch): Promise<GeocodeCandidate | null> {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    return null;
+  }
+  for (let hop = 0; hop < MAX_HOPS && SHORT_LINK_HOSTS.has(url.hostname); hop++) {
+    let res;
+    try {
+      res = await fetchImpl(url.href, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' }
+      });
+    } catch {
+      if (url.hostname === 'j.map.baidu.com') {
+        throw new Error('Baidu short links only open from inside China — open the link in your browser, then copy the full map.baidu.com address from the address bar and paste that here');
+      }
+      throw new Error(`Could not open ${url.hostname} — check the link, or paste GPS coordinates instead`);
+    }
+    const location = res.headers.get('location');
+    if (res.status < 300 || res.status >= 400 || !location) {
+      throw new Error(`That ${url.hostname} link did not lead to a location — it may have expired; share it again from the map app`);
+    }
+    // Amap's redirect Location carries raw UTF-8 (Chinese names) that arrives decoded as latin1.
+    url = new URL(Buffer.from(location, 'latin1').toString('utf8'), url);
+  }
+  return parseMapUrl(url, link);
+}
+
 // ---------- Baidu ----------
 
 // Baidu's status codes that point at configuration, not at the query.
@@ -208,18 +346,36 @@ async function geocodeAddress(address: string, city: string | null, ak: string, 
   return [{ name: address, address, lat: wgs.lat, lng: wgs.lng, map_url: baiduMarkerUrl(location.lat, location.lng, address, address), precision: 'address' }];
 }
 
+export const SHARE_LINK_HELP =
+  'To pin it exactly: in WeChat, open the location → tap the navigation button → choose Amap (高德地图) → Share → Copy link, then paste that link here';
+
 /**
- * Best matches first: the exact place name, then the name without its "(branch)" suffix, then
- * the address alone (street-level precision). Stops at the first step that finds something.
+ * A share link wins (exact, no key). Otherwise plain text goes to Baidu place search when a
+ * Baidu AK is configured: the exact place name, then the name without its "(branch)" suffix,
+ * then the address alone (street-level precision), stopping at the first step with results.
  */
-export async function geocodeLocation(text: string, fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<GeocodeCandidate[]> {
-  const parsed = parseLocationText(String(text ?? ''));
+export async function geocodeLocation(
+  text: string,
+  fetchImpl: FetchLike = fetch as unknown as FetchLike,
+  redirectFetch?: RedirectFetch
+): Promise<GeocodeCandidate[]> {
+  const raw = String(text ?? '');
+  const link = /https?:\/\/[^\s，。]+/.exec(raw)?.[0];
+  if (link) {
+    const candidate = await resolveMapLink(link, redirectFetch);
+    if (!candidate) {
+      throw new Error(`No location found in that link. ${SHARE_LINK_HELP}`);
+    }
+    return [candidate];
+  }
+
+  const parsed = parseLocationText(raw);
   if (!parsed.name) {
-    throw new Error('Paste a place name and address, e.g. from a WeChat location');
+    throw new Error('Paste an Amap/Baidu share link, GPS coordinates, or a WeChat location');
   }
   const ak = await getBaiduAk();
   if (!ak) {
-    throw new Error('Baidu Maps lookup is not set up yet — an admin can add a Baidu AK on the Admin page');
+    throw new Error(`Plain text can't be pinned exactly without a map service account. ${SHARE_LINK_HELP}`);
   }
 
   const baseName = parsed.name.replace(/[（(][^）)]*[）)]$/, '');

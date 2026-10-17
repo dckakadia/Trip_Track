@@ -853,7 +853,7 @@ function plotMap() {
   summary.textContent = noMatch
     ? `No suppliers match these filters — ${hiddenByFilters} hidden. Turn a filter off to see them.` + placesText
     : points.length === 0
-      ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates or a WeChat location, and hit "Find location".'
+      ? 'No suppliers with a location yet — open a supplier, paste an Amap share link or GPS coordinates, and hit "Find location".'
       : `${suppliersPlotted} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
         (hiddenByFilters > 0 ? ` · ${hiddenByFilters} hidden by filters` : '') +
         (missing > 0 ? ` · ${missing} missing a location` : '') +
@@ -1262,7 +1262,7 @@ async function renderBaiduSettings() {
   const label = document.getElementById('baidu-ak-status');
   label.textContent = info.configured
     ? `✓ Baidu Maps lookup is on (key ${info.masked}${info.source === 'env' ? ', set on the server' : ''}).`
-    : 'Not set up — WeChat location lookup is off until you add a key.';
+    : 'Not set up (optional) — share links from Amap work without a key; a key only adds plain-text lookup.';
   label.classList.toggle('error', !info.configured);
 }
 
@@ -1586,8 +1586,9 @@ function wireCoordsHelper(formId, inputId, buttonId, statusId) {
       setCoordsStatus(statusId, 'Paste GPS coordinates or a WeChat location first', true);
       return;
     }
-    // Coordinates in the text (phone GPS, a map share URL) win — no lookup needed.
-    const coords = parseCoordinates(text);
+    // Bare coordinates (phone GPS) apply directly. Links always go to the server: Amap/Baidu/
+    // Tencent share links carry offset Chinese-datum coordinates that need converting first.
+    const coords = /https?:\/\//.test(text) ? null : parseCoordinates(text);
     if (coords) {
       fillLocation(coords.lat, coords.lng, `https://www.google.com/maps?q=${coords.lat},${coords.lng}`);
       input.value = '';
@@ -1596,9 +1597,9 @@ function wireCoordsHelper(formId, inputId, buttonId, statusId) {
       return;
     }
 
-    // Otherwise treat it as a place name + address (e.g. a WeChat location) and look it up on Baidu.
+    // Otherwise resolve the share link, or look the place name + address up on Baidu.
     button.disabled = true;
-    setCoordsStatus(statusId, 'Searching Baidu Maps…', false);
+    setCoordsStatus(statusId, /https?:\/\//.test(text) ? 'Reading the map link…' : 'Searching Baidu Maps…', false);
     try {
       const { candidates } = await api('POST', '/api/geocode', { query: text });
       if (candidates.length === 0) {
@@ -1606,7 +1607,7 @@ function wireCoordsHelper(formId, inputId, buttonId, statusId) {
       } else if (candidates.length === 1) {
         pickCandidate(candidates[0]);
       } else {
-        setCoordsStatus(statusId, `Found ${candidates.length} matches on Baidu Maps — tap the right one:`, false);
+        setCoordsStatus(statusId, `Found ${candidates.length} matches — tap the right one:`, false);
         for (const candidate of candidates) {
           const option = el('button', 'geo-result');
           option.type = 'button';

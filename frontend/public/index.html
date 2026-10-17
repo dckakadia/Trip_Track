@@ -121,10 +121,11 @@
         <input name="address_en" placeholder="Address (EN)" />
         <input name="address_cn" placeholder="Address (中文)" />
         <div class="coords-helper">
-          <input id="supplier-coords-input" type="text" placeholder="Paste a WeChat location (name + address) or GPS coordinates" />
+          <input id="supplier-coords-input" type="text" placeholder="Paste an Amap/Baidu share link or GPS coordinates" />
           <button type="button" id="supplier-coords-apply" class="file-button outline">Find location</button>
         </div>
         <p id="supplier-coords-status" class="coords-status"></p>
+        <p class="coords-hint">From WeChat: open the location → navigation button → <b>Amap (高德地图)</b> → Share → Copy link.</p>
         <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
         <input type="hidden" name="gps_lat" />
         <input type="hidden" name="gps_lng" />
@@ -182,10 +183,11 @@
         </select>
         <input name="address" placeholder="Address" />
         <div class="coords-helper">
-          <input id="place-coords-input" type="text" placeholder="Paste a WeChat location (name + address) or GPS coordinates" />
+          <input id="place-coords-input" type="text" placeholder="Paste an Amap/Baidu share link or GPS coordinates" />
           <button type="button" id="place-coords-apply" class="file-button outline">Find location</button>
         </div>
         <p id="place-coords-status" class="coords-status"></p>
+        <p class="coords-hint">From WeChat: open the location → navigation button → <b>Amap (高德地图)</b> → Share → Copy link.</p>
         <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
         <input type="hidden" name="gps_lat" />
         <input type="hidden" name="gps_lng" />
@@ -275,8 +277,8 @@
       <div id="user-list"></div>
 
       <div class="card">
-        <h2>Baidu Maps</h2>
-        <p class="muted">Finds GPS coordinates for a pasted WeChat location (place name + address). Needs a free Baidu Maps server key (AK) from lbsyun.baidu.com with 地点检索 and 地理编码 enabled and this server's IP whitelisted.</p>
+        <h2>Baidu Maps (optional)</h2>
+        <p class="muted">Amap/Baidu share links already pin suppliers exactly with no key. A Baidu server key (AK) adds lookup from plain text (place name + address) — it needs a Baidu developer account with a Chinese phone number, 地点检索 and 地理编码 enabled, and this server's IP whitelisted.</p>
         <form id="baidu-ak-form" class="baidu-ak-form">
           <input name="ak" placeholder="Paste Baidu AK" autocomplete="off" />
           <button type="submit">Save key</button>

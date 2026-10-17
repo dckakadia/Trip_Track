@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeDatabase } from '../db/migrations.ts';
 import { setSetting } from '../repositories/settingsRepository.ts';
-import { BAIDU_AK_SETTING, gcj02ToWgs84, geocodeLocation, parseLocationText, wgs84ToGcj02 } from './geocode.ts';
+import { BAIDU_AK_SETTING, bd09mcToGcj02, gcj02ToWgs84, geocodeLocation, parseLocationText, parseMapUrl, resolveMapLink, wgs84ToGcj02 } from './geocode.ts';
 
 const WECHAT_TEXT = '江阴市永芳印刷有限公司(火车站路) 江阴市锡澄路辅路附近';
 
@@ -44,11 +44,102 @@ test('GCJ-02 ⇄ WGS-84 conversion matches the reference offset and round-trips'
   assert.deepEqual(gcj02ToWgs84(51.5, -0.12), { lat: 51.5, lng: -0.12 });
 });
 
-test('geocodeLocation needs a Baidu AK', async () => {
+test('plain text without a Baidu AK explains how to get an exact share link instead', async () => {
   initializeDatabase();
   delete process.env.TRIPTRACK_BAIDU_AK;
-  await assert.rejects(geocodeLocation(WECHAT_TEXT, fakeBaidu([]).fetchImpl), /not set up yet/);
-  await assert.rejects(geocodeLocation('   ', fakeBaidu([]).fetchImpl), /Paste a place name/);
+  await assert.rejects(geocodeLocation(WECHAT_TEXT, fakeBaidu([]).fetchImpl), /Amap \(高德地图\) → Share → Copy link/);
+  await assert.rejects(geocodeLocation('   ', fakeBaidu([]).fetchImpl), /Paste an Amap\/Baidu share link/);
+});
+
+// --- Share links (no key needed) ---
+
+function fakeRedirects(hops: Record<string, { status: number; location?: string }>) {
+  const fetched: string[] = [];
+  const redirectFetch = async (url: string) => {
+    fetched.push(url);
+    const hop = hops[url];
+    if (!hop) throw new Error('connect ETIMEDOUT');
+    return { status: hop.status, headers: { get: (name: string) => (name === 'location' ? hop.location ?? null : null) } };
+  };
+  return { redirectFetch, fetched };
+}
+
+test('an Amap short link resolves through its redirect to exact, converted coordinates', async () => {
+  // Real redirect shape (captured from surl.amap.com): Location carries raw UTF-8 Chinese,
+  // which fetch hands over decoded as latin1.
+  const target = 'http://wb.amap.com/?p=B0LUC7X3BN,22.593418,113.875046,深圳市昊想科技有限公司,西乡街道臣田工业区36栋401室';
+  const { redirectFetch, fetched } = fakeRedirects({
+    'https://surl.amap.com/PtA5D4u4pD': { status: 302, location: Buffer.from(target, 'utf8').toString('latin1') }
+  });
+  const pasted = '深圳市昊想科技有限公司 https://surl.amap.com/PtA5D4u4pD 复制链接打开高德地图';
+  const [candidate] = await geocodeLocation(pasted, fakeBaidu([]).fetchImpl, redirectFetch);
+  assert.deepEqual(fetched, ['https://surl.amap.com/PtA5D4u4pD'], 'only the short-link host is fetched, never the target');
+  assert.equal(candidate!.name, '深圳市昊想科技有限公司');
+  assert.equal(candidate!.address, '西乡街道臣田工业区36栋401室');
+  assert.equal(candidate!.map_url, 'https://surl.amap.com/PtA5D4u4pD');
+  assert.equal(candidate!.precision, 'place');
+  // Stored WGS-84 converts back to Amap's GCJ-02 point.
+  const back = wgs84ToGcj02(candidate!.lat, candidate!.lng);
+  assert.ok(Math.abs(back.lat - 22.593418) < 2e-6 && Math.abs(back.lng - 113.875046) < 2e-6, JSON.stringify(back));
+});
+
+test('Amap, Baidu, and Tencent full links parse with the right axis order and datum', () => {
+  const near = (c: { lat: number; lng: number } | null, gcjLat: number, gcjLng: number) => {
+    assert.ok(c);
+    const back = wgs84ToGcj02(c.lat, c.lng);
+    assert.ok(Math.abs(back.lat - gcjLat) < 2e-6 && Math.abs(back.lng - gcjLng) < 2e-6, `${JSON.stringify(back)} vs ${gcjLat},${gcjLng}`);
+  };
+  const parse = (url: string) => parseMapUrl(new URL(url), url);
+
+  near(parse('https://wb.amap.com/?q=31.222811749011463%2C121.46840706467624%2C%E4%B8%8A%E6%B5%B7%E5%B8%82%E9%BB%84%E6%B5%A6%E5%8C%BA&src=app_C3090'), 31.222811749011463, 121.46840706467624);
+  assert.equal(parse('https://wb.amap.com/?q=31.2228,121.4684,上海市黄浦区')!.name, '上海市黄浦区');
+  // URI API puts longitude first.
+  near(parse('https://uri.amap.com/marker?position=120.268741,31.906512&name=永芳印刷'), 31.906512, 120.268741);
+
+  // Baidu Mercator → GCJ-02 reproduces GeoShare's reference conversions.
+  const refs: Array<[number, number, number, number]> = [
+    [13520653, 3317203, 28.696786436412197, 121.45032959369264],
+    [12613508.26, 2629182.88, 23.110319308993134, 113.30138024838311]
+  ];
+  for (const [x, y, lat, lng] of refs) {
+    const gcj = bd09mcToGcj02(x, y);
+    assert.ok(Math.abs(gcj.lat - lat) < 1e-7 && Math.abs(gcj.lng - lng) < 1e-7, JSON.stringify(gcj));
+  }
+  const baidu = parse('https://map.baidu.com/poi/%E5%9C%B0%E5%9B%BE%E4%B8%8A%E7%9A%84%E7%82%B9/@13520653,3317203,17z?querytype=share&poiShareId=p8cdf');
+  near(baidu, 28.696786436412197, 121.45032959369264);
+  assert.equal(baidu!.name, '地图上的点');
+  near(
+    parse('https://map.baidu.com/mobile/webapp/place/detail/qt=inf&uid=p8cdf/act=read_share&vt=map&sharegeo=12613508.26%2C2629182.88'),
+    23.110319308993134,
+    113.30138024838311
+  );
+
+  // Tencent: pointx is longitude; marker=coord: is lat,lng.
+  near(parse('https://map.qq.com/?type=marker&pointx=120.268741&pointy=31.906512&name=永芳'), 31.906512, 120.268741);
+  const qq = parse('https://apis.map.qq.com/uri/v1/marker?marker=coord:31.906512,120.268741;title:永芳印刷;addr:锡澄路');
+  near(qq, 31.906512, 120.268741);
+  assert.deepEqual([qq!.name, qq!.address], ['永芳印刷', '锡澄路']);
+
+  // Links without coordinates yield nothing.
+  assert.equal(parse('https://map.baidu.com/?poiShareId=p8cdf0522067cf66173901fc9e4'), null);
+  assert.equal(parse('https://example.com/?q=31.2,121.4'), null);
+});
+
+test('share links never make the server fetch other hosts, and failures explain what to do', async () => {
+  // Internal / arbitrary hosts are parsed, never fetched.
+  const internal = fakeRedirects({});
+  await assert.rejects(geocodeLocation('http://127.0.0.1:4600/api/sync/pull', fakeBaidu([]).fetchImpl, internal.redirectFetch), /No location found in that link/);
+  assert.deepEqual(internal.fetched, []);
+  // A short link redirecting somewhere internal stops after that one hop.
+  const bounce = fakeRedirects({ 'https://surl.amap.com/evil': { status: 302, location: 'http://127.0.0.1:4600/x' } });
+  await assert.rejects(geocodeLocation('https://surl.amap.com/evil', fakeBaidu([]).fetchImpl, bounce.redirectFetch), /No location found/);
+  assert.deepEqual(bounce.fetched, ['https://surl.amap.com/evil']);
+
+  // Baidu short links time out outside China.
+  await assert.rejects(resolveMapLink('https://j.map.baidu.com/0f/tbWk', fakeRedirects({}).redirectFetch), /copy the full map\.baidu\.com address/);
+  // An expired Amap link answers 200 with no redirect.
+  const expired = fakeRedirects({ 'https://surl.amap.com/old': { status: 200 } });
+  await assert.rejects(resolveMapLink('https://surl.amap.com/old', expired.redirectFetch), /may have expired/);
 });
 
 test('geocodeLocation searches Baidu places, converts to WGS-84, and builds a Baidu map link', async () => {
