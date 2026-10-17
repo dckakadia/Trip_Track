@@ -49,7 +49,7 @@ test('plain text without a Baidu AK explains how to get an exact share link inst
   initializeDatabase();
   delete process.env.TRIPTRACK_BAIDU_AK;
   await assert.rejects(geocodeLocation(WECHAT_TEXT, fakeBaidu([]).fetchImpl), /Amap \(高德地图\) → Share → Copy link/);
-  await assert.rejects(geocodeLocation('   ', fakeBaidu([]).fetchImpl), /Paste an Amap\/Baidu share link/);
+  await assert.rejects(geocodeLocation('   ', fakeBaidu([]).fetchImpl), /Paste a Google Maps\/Amap\/Baidu share link/);
 });
 
 // --- Share links (no key needed) ---
@@ -266,4 +266,15 @@ test('fetchRedirect skips addresses that drop connections and reads the redirect
   assert.equal(parsed!.name, '锡澄路1071号');
   const back = wgs84ToGcj02(parsed!.lat, parsed!.lng);
   assert.ok(Math.abs(back.lat - 31.80362316949228) < 2e-6 && Math.abs(back.lng - 120.24947181344031) < 2e-6);
+});
+
+test('resolves a Google Maps short link to the exact pin', async () => {
+  const fetchImpl = async () => ({
+    status: 302,
+    headers: { get: () => 'https://www.google.com/maps/place/Shanghai+Pudong+International+Airport/@31.1443439,121.8056981,17z/data=!3m1!4b1!8m2!3d31.1443439!4d121.808273?entry=tts' }
+  });
+  const result = await resolveMapLink('https://maps.app.goo.gl/ZFYDYsRn6RRCEXGy7', fetchImpl as never);
+  assert.equal(result?.lat, 31.1443439);
+  assert.equal(result?.lng, 121.808273);
+  assert.equal(result?.name, 'Shanghai Pudong International Airport');
 });

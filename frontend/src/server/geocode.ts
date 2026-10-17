@@ -152,7 +152,7 @@ export function bd09mcToGcj02(x: number, y: number): { lat: number; lng: number 
 
 // Only these hosts are ever fetched, and only to read their redirect Location — never the
 // final page — so a pasted URL can't make the server request arbitrary/internal addresses.
-const SHORT_LINK_HOSTS = new Set(['surl.amap.com', 'j.map.baidu.com']);
+const SHORT_LINK_HOSTS = new Set(['surl.amap.com', 'j.map.baidu.com', 'maps.app.goo.gl', 'goo.gl']);
 const MAX_HOPS = 5;
 
 type RedirectFetch = (url: string, init: { redirect: 'manual'; signal: AbortSignal; headers: Record<string, string> }) => Promise<{
@@ -247,6 +247,20 @@ export function parseMapUrl(url: URL, shareUrl: string): GeocodeCandidate | null
     const position = param('position')?.split(',');
     if (position && position.length >= 2 && finite(Number(position[0]), Number(position[1]))) {
       return wgsCandidate(Number(position[1]), Number(position[0]), param('name') || 'Amap location', '', shareUrl);
+    }
+  }
+
+  if (/(^|\.)google\.[a-z.]+$/.test(host) && url.pathname.startsWith('/maps')) {
+    // google.com/maps/place/NAME/@lat,lng,17z/data=…!3dLAT!4dLNG  — !3d/!4d is the exact pin,
+    // @ is only the viewport centre. Google coordinates are used as WGS-84.
+    const path = decodeURIComponent(url.pathname + url.search);
+    const pin = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(path);
+    const view = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(path);
+    const query = /[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(path);
+    const hit = pin ?? query ?? view;
+    if (hit && finite(Number(hit[1]), Number(hit[2]))) {
+      const name = /\/place\/([^/@]+)/.exec(path)?.[1]?.replace(/\+/g, ' ') ?? 'Google Maps location';
+      return { name, address: '', lat: Number(hit[1]), lng: Number(hit[2]), map_url: shareUrl, precision: 'place' };
     }
   }
 
@@ -431,7 +445,7 @@ export async function geocodeLocation(
 
   const parsed = parseLocationText(raw);
   if (!parsed.name) {
-    throw new Error('Paste an Amap/Baidu share link, GPS coordinates, or a WeChat location');
+    throw new Error('Paste a Google Maps/Amap/Baidu share link, GPS coordinates, or a WeChat location');
   }
   const ak = await getBaiduAk();
   if (!ak) {
