@@ -607,6 +607,7 @@ function setSupplierFormMode(supplier) {
   document.getElementById('supplier-form-cancel').classList.toggle('hidden', !supplier);
   document.getElementById('supplier-coords-input').value = '';
   setCoordsStatus('supplier-coords-status', '', false);
+  document.querySelector('#supplier-form .geo-results')?.replaceChildren();
   if (supplier) {
     for (const input of form.querySelectorAll('input[name]')) {
       if (input.name !== 'id') input.value = supplier[input.name] ?? '';
@@ -852,7 +853,7 @@ function plotMap() {
   summary.textContent = noMatch
     ? `No suppliers match these filters — ${hiddenByFilters} hidden. Turn a filter off to see them.` + placesText
     : points.length === 0
-      ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates, and hit "Build map link".'
+      ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates or a WeChat location, and hit "Find location".'
       : `${suppliersPlotted} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
         (hiddenByFilters > 0 ? ` · ${hiddenByFilters} hidden by filters` : '') +
         (missing > 0 ? ` · ${missing} missing a location` : '') +
@@ -878,6 +879,7 @@ function setPlaceFormMode(place) {
   document.getElementById('place-form-cancel').classList.toggle('hidden', !place);
   document.getElementById('place-coords-input').value = '';
   setCoordsStatus('place-coords-status', '', false);
+  document.querySelector('#place-form .geo-results')?.replaceChildren();
   if (place) {
     for (const input of form.querySelectorAll('input[name], select[name]')) {
       if (input.name !== 'id') input.value = place[input.name] ?? '';
@@ -1255,6 +1257,15 @@ async function renderUsers() {
   }
 }
 
+async function renderBaiduSettings() {
+  const info = await api('GET', '/api/admin/baidu-ak');
+  const label = document.getElementById('baidu-ak-status');
+  label.textContent = info.configured
+    ? `✓ Baidu Maps lookup is on (key ${info.masked}${info.source === 'env' ? ', set on the server' : ''}).`
+    : 'Not set up — WeChat location lookup is off until you add a key.';
+  label.classList.toggle('error', !info.configured);
+}
+
 async function exportDataFile() {
   const res = await fetch('/api/admin/export');
   if (!res.ok) {
@@ -1318,7 +1329,10 @@ function activateView(name) {
   if (name === 'today') renderToday().catch((error) => toast(error.message));
   if (name === 'schedule') renderSchedule().catch((error) => toast(error.message));
   if (name === 'trips') renderTrips().catch((error) => toast(error.message));
-  if (name === 'admin') renderUsers().catch((error) => toast(error.message));
+  if (name === 'admin') {
+    renderUsers().catch((error) => toast(error.message));
+    renderBaiduSettings().catch((error) => toast(error.message));
+  }
   if (name === 'map') renderMap().catch((error) => toast(error.message));
   if (name === 'live') renderLive();
 }
@@ -1417,6 +1431,19 @@ document.getElementById('user-form-cancel').addEventListener('click', () => {
   document.getElementById('user-form').classList.add('hidden');
 });
 document.getElementById('export-button').addEventListener('click', exportDataFile);
+document.getElementById('baidu-ak-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await api('PUT', '/api/admin/baidu-ak', { ak: form.elements.ak.value });
+    form.reset();
+    await renderBaiduSettings();
+  } catch (error) {
+    const label = document.getElementById('baidu-ak-status');
+    label.textContent = error.message;
+    label.classList.add('error');
+  }
+});
 document.getElementById('import-file').addEventListener('change', (event) => {
   const file = event.currentTarget.files?.[0];
   if (file) importDataFile(file);
@@ -1525,30 +1552,79 @@ function setCoordsStatus(statusId, message, isError) {
 // share, Amap, Baidu) without needing Google Maps itself to load — useful where Google Maps is
 // blocked (e.g. mainland China).
 function wireCoordsHelper(formId, inputId, buttonId, statusId) {
-  const apply = () => {
-    const input = document.getElementById(inputId);
-    const coords = parseCoordinates(input.value);
-    if (!coords) {
-      // Shown inline next to the button, not just via the header toast — that toast is easy to
-      // miss when this button is scrolled far down a long form (which it usually is).
-      setCoordsStatus(
-        statusId,
-        input.value.trim() ? `Could not find coordinates like "31.23, 121.47" in "${input.value.trim()}"` : 'Paste coordinates first',
-        true
-      );
+  const form = document.getElementById(formId);
+  const input = document.getElementById(inputId);
+  const button = document.getElementById(buttonId);
+  const status = document.getElementById(statusId);
+  const results = el('div', 'geo-results hidden');
+  status.after(results);
+
+  const fillLocation = (lat, lng, mapUrl, address) => {
+    form.querySelector('input[name="map_url"]').value = mapUrl;
+    form.querySelector('input[name="gps_lat"]').value = lat;
+    form.querySelector('input[name="gps_lng"]').value = lng;
+    // Fill the address too when the form has none yet (supplier: Chinese address; place: address).
+    const addressInput = form.querySelector('input[name="address_cn"]') || form.querySelector('input[name="address"]');
+    if (address && addressInput && !addressInput.value.trim()) addressInput.value = address;
+  };
+
+  const pickCandidate = (candidate) => {
+    fillLocation(candidate.lat, candidate.lng, candidate.map_url, candidate.address);
+    results.classList.add('hidden');
+    results.replaceChildren();
+    input.value = '';
+    const precision = candidate.precision === 'address' ? ' (street-level match — check the pin)' : '';
+    setCoordsStatus(statusId, `✓ ${candidate.name} — ${candidate.lat}, ${candidate.lng}${precision}. Save the form to keep it`, false);
+    toast('Location found — will show on the Map tab once saved');
+  };
+
+  const apply = async () => {
+    results.classList.add('hidden');
+    results.replaceChildren();
+    const text = input.value.trim();
+    if (!text) {
+      setCoordsStatus(statusId, 'Paste GPS coordinates or a WeChat location first', true);
       return;
     }
-    const form = document.getElementById(formId);
-    form.querySelector('input[name="map_url"]').value = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
-    form.querySelector('input[name="gps_lat"]').value = coords.lat;
-    form.querySelector('input[name="gps_lng"]').value = coords.lng;
-    input.value = '';
-    setCoordsStatus(statusId, `✓ Map link built from ${coords.lat}, ${coords.lng} — save the form to keep it`, false);
-    toast('Map link built — will also show on the Map tab once saved');
+    // Coordinates in the text (phone GPS, a map share URL) win — no lookup needed.
+    const coords = parseCoordinates(text);
+    if (coords) {
+      fillLocation(coords.lat, coords.lng, `https://www.google.com/maps?q=${coords.lat},${coords.lng}`);
+      input.value = '';
+      setCoordsStatus(statusId, `✓ Map link built from ${coords.lat}, ${coords.lng} — save the form to keep it`, false);
+      toast('Map link built — will also show on the Map tab once saved');
+      return;
+    }
+
+    // Otherwise treat it as a place name + address (e.g. a WeChat location) and look it up on Baidu.
+    button.disabled = true;
+    setCoordsStatus(statusId, 'Searching Baidu Maps…', false);
+    try {
+      const { candidates } = await api('POST', '/api/geocode', { query: text });
+      if (candidates.length === 0) {
+        setCoordsStatus(statusId, `Baidu Maps found nothing for "${text}" — try just the company name, or paste coordinates`, true);
+      } else if (candidates.length === 1) {
+        pickCandidate(candidates[0]);
+      } else {
+        setCoordsStatus(statusId, `Found ${candidates.length} matches on Baidu Maps — tap the right one:`, false);
+        for (const candidate of candidates) {
+          const option = el('button', 'geo-result');
+          option.type = 'button';
+          option.append(el('span', 'geo-result-name', candidate.name), el('span', 'geo-result-address', candidate.address));
+          option.addEventListener('click', () => pickCandidate(candidate));
+          results.append(option);
+        }
+        results.classList.remove('hidden');
+      }
+    } catch (error) {
+      setCoordsStatus(statusId, error.message, true);
+    } finally {
+      button.disabled = false;
+    }
   };
-  document.getElementById(buttonId).addEventListener('click', apply);
-  // Enter in this field should build the link, not submit the whole form.
-  document.getElementById(inputId).addEventListener('keydown', (event) => {
+  button.addEventListener('click', apply);
+  // Enter in this field should look up the location, not submit the whole form.
+  input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
       apply();

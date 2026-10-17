@@ -545,3 +545,24 @@ button.shortlist-toggle:disabled { opacity: 0.45; cursor: default; }
   .priority-option { padding: 0.5rem 0.9rem; font-size: 0.9rem; }
   .supplier-note { flex-basis: 100%; font-size: 1rem; padding: 0.5rem 0.6rem; }
 }
+
+/* --- WeChat location lookup (Baidu Maps) --- */
+
+.geo-results { grid-column: 1 / -1; display: grid; gap: 0.35rem; }
+
+.geo-result {
+  display: grid;
+  gap: 0.1rem;
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #c7d9ea;
+  border-radius: 6px;
+  background: #f5f9fd;
+}
+
+.geo-result:hover { border-color: #14324f; }
+.geo-result-name { font-weight: 600; }
+.geo-result-address { font-size: 0.82rem; color: #5a6472; }
+
+.baidu-ak-form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.baidu-ak-form input { flex: 1 1 14rem; min-width: 0; }

@@ -63,7 +63,8 @@ import {
 } from './auth.ts';
 import { exportData, importData, type DataDump } from '../sync/dataTransfer.ts';
 import { buildSampleXlsx, importSupplierFile } from '../importers/supplierImport.ts';
-import { getSetting } from '../repositories/settingsRepository.ts';
+import { getSetting, setSetting } from '../repositories/settingsRepository.ts';
+import { BAIDU_AK_SETTING, geocodeLocation } from './geocode.ts';
 import { countPendingOps } from '../sync/pendingOps.ts';
 import { LAST_SYNC_KEY, runSync } from '../sync/syncEngine.ts';
 import { createHttpSyncTransport } from '../sync/httpSyncTransport.ts';
@@ -450,6 +451,35 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   }
   if (userMatch && method === 'DELETE') {
     sendJson(res, 200, publicUser(await softDeleteUser(userMatch[1]!)));
+    return true;
+  }
+
+  // --- Geocoding (place name/address → GPS via Baidu Maps) ---
+  if (pathname === '/api/geocode' && method === 'POST') {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, { candidates: await geocodeLocation(String(body.query ?? '')) });
+    return true;
+  }
+
+  // --- Baidu Maps key (admin). Never returned in full; env var wins over the stored setting. ---
+  if (pathname === '/api/admin/baidu-ak' && method === 'GET') {
+    const stored = await getSetting(BAIDU_AK_SETTING);
+    const active = process.env.TRIPTRACK_BAIDU_AK || stored || '';
+    sendJson(res, 200, {
+      configured: active !== '',
+      source: process.env.TRIPTRACK_BAIDU_AK ? 'env' : stored ? 'settings' : null,
+      masked: active ? `${active.slice(0, 4)}…${active.slice(-4)}` : null
+    });
+    return true;
+  }
+  if (pathname === '/api/admin/baidu-ak' && method === 'PUT') {
+    const body = await readJsonBody(req);
+    const ak = String(body.ak ?? '').trim();
+    if (ak && !/^[A-Za-z0-9]{16,64}$/.test(ak)) {
+      throw new Error('That does not look like a Baidu AK (letters and digits only)');
+    }
+    await setSetting(BAIDU_AK_SETTING, ak);
+    sendJson(res, 200, { configured: ak !== '' || Boolean(process.env.TRIPTRACK_BAIDU_AK) });
     return true;
   }
 

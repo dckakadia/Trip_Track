@@ -121,8 +121,8 @@
         <input name="address_en" placeholder="Address (EN)" />
         <input name="address_cn" placeholder="Address (中文)" />
         <div class="coords-helper">
-          <input id="supplier-coords-input" type="text" placeholder="Or paste GPS coordinates (e.g. from phone GPS, Apple Maps, WeChat, Amap) — no Google Maps needed" />
-          <button type="button" id="supplier-coords-apply" class="file-button outline">Build map link</button>
+          <input id="supplier-coords-input" type="text" placeholder="Paste a WeChat location (name + address) or GPS coordinates" />
+          <button type="button" id="supplier-coords-apply" class="file-button outline">Find location</button>
         </div>
         <p id="supplier-coords-status" class="coords-status"></p>
         <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
@@ -182,8 +182,8 @@
         </select>
         <input name="address" placeholder="Address" />
         <div class="coords-helper">
-          <input id="place-coords-input" type="text" placeholder="Or paste GPS coordinates (e.g. from phone GPS, Apple Maps, WeChat, Amap) — no Google Maps needed" />
-          <button type="button" id="place-coords-apply" class="file-button outline">Build map link</button>
+          <input id="place-coords-input" type="text" placeholder="Paste a WeChat location (name + address) or GPS coordinates" />
+          <button type="button" id="place-coords-apply" class="file-button outline">Find location</button>
         </div>
         <p id="place-coords-status" class="coords-status"></p>
         <input name="map_url" type="url" placeholder="Map link (Google Maps, Amap, Baidu — any link works)" />
@@ -273,6 +273,16 @@
         <button type="button" id="user-form-cancel" class="hidden">Cancel edit</button>
       </form>
       <div id="user-list"></div>
+
+      <div class="card">
+        <h2>Baidu Maps</h2>
+        <p class="muted">Finds GPS coordinates for a pasted WeChat location (place name + address). Needs a free Baidu Maps server key (AK) from lbsyun.baidu.com with 地点检索 and 地理编码 enabled and this server's IP whitelisted.</p>
+        <form id="baidu-ak-form" class="baidu-ak-form">
+          <input name="ak" placeholder="Paste Baidu AK" autocomplete="off" />
+          <button type="submit">Save key</button>
+        </form>
+        <p id="baidu-ak-status" class="coords-status"></p>
+      </div>
 
       <div class="card">
         <h2>Data</h2>
