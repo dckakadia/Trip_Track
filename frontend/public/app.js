@@ -714,9 +714,22 @@ function supplierIcon(supplier) {
   return L.divIcon({
     className: 'supplier-div-icon',
     html: `<span class="supplier-pin ${pinClass}"></span>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 24],
-    popupAnchor: [0, -22]
+    iconSize: [32, 32],
+    iconAnchor: [16, 36],
+    popupAnchor: [0, -34]
+  });
+}
+
+// Solid navy bubbles (instead of markercluster's pale default green, which disappears into the
+// map's terrain); a red ring flags clusters that hide at least one Must supplier.
+function supplierClusterIcon(cluster) {
+  const hasMust = cluster.getAllChildMarkers().some((marker) => marker.options.priority === 'MUST');
+  const count = cluster.getChildCount();
+  const size = count < 10 ? 40 : count < 100 ? 46 : 52;
+  return L.divIcon({
+    className: 'supplier-cluster-icon',
+    html: `<div class="supplier-cluster${hasMust ? ' has-must' : ''}"><span>${count}</span></div>`,
+    iconSize: [size, size]
   });
 }
 
@@ -776,7 +789,11 @@ async function renderMap() {
     }).addTo(supplierMap);
     // Nearby suppliers (e.g. the Hangzhou/Shaoxing cluster) merge into numbered bubbles that
     // split apart as you zoom in. Places stay unclustered so airports/hotels are always visible.
-    supplierCluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 }).addTo(supplierMap);
+    supplierCluster = L.markerClusterGroup({
+      showCoverageOnHover: false,
+      maxClusterRadius: 45,
+      iconCreateFunction: supplierClusterIcon
+    }).addTo(supplierMap);
     placeMarkers = L.layerGroup().addTo(supplierMap);
   }
 
@@ -813,7 +830,7 @@ function plotMap() {
     const loc = entityLocation(supplier);
     if (!loc) continue;
     points.push([loc.lat, loc.lng]);
-    supplierMarkers.push(L.marker([loc.lat, loc.lng], { icon: supplierIcon(supplier) }).bindPopup(supplierPopup(supplier, loc)));
+    supplierMarkers.push(L.marker([loc.lat, loc.lng], { icon: supplierIcon(supplier), priority: supplier.visited ? 'VISITED' : supplierPriority(supplier) }).bindPopup(supplierPopup(supplier, loc)));
   }
   supplierCluster.addLayers(supplierMarkers);
   const suppliersPlotted = points.length;
