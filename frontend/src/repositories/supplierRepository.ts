@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDatabase } from '../db/connection.ts';
-import type { SupplierRecord } from '../db/schema.ts';
+import type { SupplierPriority, SupplierRecord } from '../db/schema.ts';
 import { buildUpdateClause, handleDbError, nowIso } from './repositoryHelpers.ts';
 import { queueRowUpsert } from '../sync/pendingOps.ts';
 
@@ -27,6 +27,38 @@ export interface CreateSupplierInput {
   gps_lat?: number | null;
   gps_lng?: number | null;
   notes?: string | null;
+  priority?: SupplierPriority;
+  skip_reason?: string | null;
+}
+
+export const SUPPLIER_PRIORITIES: SupplierPriority[] = ['MUST', 'MAYBE', 'SKIP'];
+
+export function assertValidPriority(priority: unknown): asserts priority is SupplierPriority {
+  if (!SUPPLIER_PRIORITIES.includes(priority as SupplierPriority)) {
+    throw new Error(`Invalid priority: ${String(priority)} (expected MUST, MAYBE, or SKIP)`);
+  }
+}
+
+/** A supplier counts as visited once it has a non-deleted visit marked DONE. */
+export interface SupplierWithVisitStatus extends SupplierRecord {
+  visited: boolean;
+  last_visit_date: string | null;
+}
+
+// `priorities` picks which of MUST/MAYBE to show; SKIP is governed by `hide_skipped` alone,
+// mirroring the Must / Maybe / Hide skipped chips in the UI.
+export interface SupplierFilters {
+  priorities?: SupplierPriority[];
+  hide_visited?: boolean;
+  hide_skipped?: boolean;
+  shortlist_trip_id?: string | null;
+}
+
+const LAST_VISIT_SQL = `(SELECT MAX(v.visit_date) FROM visits v
+  WHERE v.supplier_id = s.id AND v.status = 'DONE' AND v.deleted = 0) AS last_visit_date`;
+
+function toVisitStatus(row: SupplierRecord & { last_visit_date: string | null }): SupplierWithVisitStatus {
+  return { ...row, visited: row.last_visit_date !== null, last_visit_date: row.last_visit_date };
 }
 
 export async function createSupplier(input: CreateSupplierInput): Promise<string> {
@@ -34,11 +66,13 @@ export async function createSupplier(input: CreateSupplierInput): Promise<string
     if (!input.name) {
       throw new Error('Name is required');
     }
+    const priority = input.priority ?? 'MAYBE';
+    assertValidPriority(priority);
     const db = getDatabase();
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO suppliers (id, name, name_cn, city_id, address_cn, address_en, contact_name, contact_mobile, whatsapp, email, website, wechat_id, product_category, products, specialty, region, established, employees, export_markets, map_url, gps_lat, gps_lng, notes, updated_at, deleted, synced)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
+      `INSERT INTO suppliers (id, name, name_cn, city_id, address_cn, address_en, contact_name, contact_mobile, whatsapp, email, website, wechat_id, product_category, products, specialty, region, established, employees, export_markets, map_url, gps_lat, gps_lng, notes, priority, skip_reason, updated_at, deleted, synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`
     ).run(
       id,
       input.name,
@@ -63,6 +97,8 @@ export async function createSupplier(input: CreateSupplierInput): Promise<string
       input.gps_lat ?? null,
       input.gps_lng ?? null,
       input.notes ?? null,
+      priority,
+      input.skip_reason ?? '',
       nowIso()
     );
     queueRowUpsert('suppliers', id);
@@ -81,13 +117,44 @@ export async function getSupplierById(id: string): Promise<SupplierRecord | null
   }
 }
 
-export async function listSuppliers(): Promise<SupplierRecord[]> {
+export async function listSuppliers(filters: SupplierFilters = {}): Promise<SupplierWithVisitStatus[]> {
   try {
-    return getDatabase()
-      .prepare('SELECT * FROM suppliers WHERE deleted = 0 ORDER BY name')
-      .all() as SupplierRecord[];
+    const db = getDatabase();
+    const rows = (
+      db.prepare(`SELECT s.*, ${LAST_VISIT_SQL} FROM suppliers s WHERE s.deleted = 0 ORDER BY s.name`).all() as Array<
+        SupplierRecord & { last_visit_date: string | null }
+      >
+    ).map(toVisitStatus);
+    const shortlist = filters.shortlist_trip_id
+      ? new Set(
+          (
+            db
+              .prepare('SELECT supplier_id FROM trip_suppliers WHERE trip_id = ? AND deleted = 0')
+              .all(filters.shortlist_trip_id) as Array<{ supplier_id: string }>
+          ).map((row) => row.supplier_id)
+        )
+      : null;
+    return rows.filter((supplier) => {
+      const priority = supplier.priority ?? 'MAYBE';
+      if (filters.priorities && priority !== 'SKIP' && !filters.priorities.includes(priority)) return false;
+      if (filters.hide_skipped && priority === 'SKIP') return false;
+      if (filters.hide_visited && supplier.visited) return false;
+      if (shortlist && !shortlist.has(supplier.id)) return false;
+      return true;
+    });
   } catch (error) {
     handleDbError('list suppliers', error);
+  }
+}
+
+export async function getSupplierWithVisitStatus(id: string): Promise<SupplierWithVisitStatus | null> {
+  try {
+    const row = getDatabase().prepare(`SELECT s.*, ${LAST_VISIT_SQL} FROM suppliers s WHERE s.id = ?`).get(id) as
+      | (SupplierRecord & { last_visit_date: string | null })
+      | undefined;
+    return row ? toVisitStatus(row) : null;
+  } catch (error) {
+    handleDbError('read supplier', error);
   }
 }
 
@@ -110,6 +177,12 @@ export async function updateSupplier(
     const existing = await getSupplierById(id);
     if (!existing) {
       throw new Error('Supplier not found');
+    }
+    if (updates.priority !== undefined) {
+      assertValidPriority(updates.priority);
+    }
+    if (updates.skip_reason === null) {
+      updates = { ...updates, skip_reason: '' };
     }
 
     const { setSql, values } = buildUpdateClause('suppliers', updates);

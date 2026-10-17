@@ -244,6 +244,8 @@ button[type="submit"], #sync-button {
   border-radius: 8px;
   border: 1px solid #e1e4e9;
   background: #e9ebee;
+  /* Contain Leaflet's pane z-indexes (400+) so the map can't paint over the fixed bottom tab bar. */
+  isolation: isolate;
 }
 
 .supplier-map .leaflet-popup-content { font: inherit; font-size: 0.85rem; min-width: 10rem; }
@@ -420,3 +422,91 @@ button.map-link {
 .map-link.danger:hover { background: #fbeeec; }
 
 .auth-screen .form-grid { grid-template-columns: 1fr; }
+
+/* --- Supplier priority, shortlist, and filter chips --- */
+
+.filter-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.7rem; }
+
+.chip {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid #c7ccd4;
+  border-radius: 999px;
+  background: #fff;
+  color: #5a6472;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.chip.on { background: #14324f; border-color: #14324f; color: #fff; }
+.chip.on::before { content: '✓ '; }
+.chip:disabled { opacity: 0.45; cursor: default; }
+
+.supplier-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.55rem; cursor: default; }
+
+.priority-toggle { display: inline-flex; border: 1px solid #c7ccd4; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+
+.priority-option {
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid #c7ccd4;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #5a6472;
+  background: #fff;
+}
+
+.priority-option:last-child { border-right: none; }
+.priority-option.active.priority-MUST { background: #d64545; color: #fff; }
+.priority-option.active.priority-MAYBE { background: #f08c00; color: #fff; }
+.priority-option.active.priority-SKIP { background: #5a6472; color: #fff; }
+
+.shortlist-toggle.on { background: #e6f4ea; border-color: #9fd3b0; color: #147a45; }
+button.shortlist-toggle:disabled { opacity: 0.45; cursor: default; }
+
+.supplier-note { flex: 1 1 10rem; min-width: 0; font-size: 0.85rem; padding: 0.35rem 0.55rem; }
+
+.item.is-skip > .supplier-header { opacity: 0.6; }
+
+.badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+  vertical-align: middle;
+}
+
+.badge-visited { background: #e8ebf0; color: #4a5361; }
+
+.inline-check { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+.form-grid .inline-check input { width: auto; }
+
+#map-summary.no-match { color: #a52f2f; font-weight: 600; }
+
+/* Teardrop pin: a square rounded on three corners, rotated so the sharp corner points down. */
+.supplier-div-icon { background: none; border: none; }
+
+.supplier-pin {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin: 1px 2px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.pin-MUST { background: #d64545; }
+.pin-MAYBE { background: #f08c00; }
+.pin-visited { background: #9aa1ab; }
+.pin-SKIP { background: #24282f; opacity: 0.8; }
+.map-legend .supplier-pin { width: 12px; height: 12px; border-width: 1px; margin: 0 2px 0 0; }
+
+@media (max-width: 700px) {
+  .chip { min-height: 2.5rem; font-size: 0.88rem; }
+  .priority-option { padding: 0.5rem 0.9rem; font-size: 0.9rem; }
+  .supplier-note { flex-basis: 100%; font-size: 1rem; padding: 0.5rem 0.6rem; }
+}

@@ -7,11 +7,21 @@ import type { PhotoParentType, UserRecord, VisitStatus } from '../db/schema.ts';
 import { createTrip, getTripById, listTrips, softDeleteTrip, updateTrip } from '../repositories/tripRepository.ts';
 import { createCity, listCitiesByTrip, softDeleteCity, updateCity } from '../repositories/cityRepository.ts';
 import {
+  assertValidPriority,
   createSupplier,
+  getSupplierWithVisitStatus,
   listSuppliers,
   softDeleteSupplier,
-  updateSupplier
+  updateSupplier,
+  type SupplierFilters
 } from '../repositories/supplierRepository.ts';
+import {
+  addSupplierToTrip,
+  countShortlistedByTrip,
+  listTripSuppliers,
+  removeSupplierFromTrip,
+  softDeleteTripSupplier
+} from '../repositories/tripSupplierRepository.ts';
 import { createPlace, listPlaces, softDeletePlace, updatePlace } from '../repositories/placeRepository.ts';
 import {
   createVisit,
@@ -112,6 +122,28 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
   }
 }
 
+// GET /api/suppliers filters — all optional, so a bare request still lists every supplier.
+//   priority=MUST,MAYBE  which non-skipped priorities to include
+//   hide_skipped=1  hide_visited=1  trip_id=<id> (only that trip's shortlist)
+function parseSupplierFilters(params: URLSearchParams): SupplierFilters {
+  const filters: SupplierFilters = {};
+  const priority = params.get('priority');
+  if (priority !== null) {
+    filters.priorities = priority
+      .split(',')
+      .filter(Boolean)
+      .map((value) => {
+        assertValidPriority(value);
+        return value;
+      });
+  }
+  const flag = (name: string) => params.get(name) === '1' || params.get(name) === 'true';
+  filters.hide_skipped = flag('hide_skipped');
+  filters.hide_visited = flag('hide_visited');
+  filters.shortlist_trip_id = params.get('trip_id');
+  return filters;
+}
+
 function publicUser(user: UserRecord): Omit<UserRecord, 'password_hash'> {
   const { password_hash, ...rest } = user;
   return rest;
@@ -203,7 +235,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
 
   // --- Trips ---
   if (pathname === '/api/trips' && method === 'GET') {
-    sendJson(res, 200, await listTrips());
+    const shortlistCounts = await countShortlistedByTrip();
+    sendJson(
+      res,
+      200,
+      (await listTrips()).map((trip) => ({ ...trip, shortlist_count: shortlistCounts[trip.id] ?? 0 }))
+    );
     return true;
   }
   if (pathname === '/api/trips' && method === 'POST') {
@@ -244,6 +281,28 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     return true;
   }
 
+  // --- Trip shortlist (trip_suppliers) ---
+  const tripSuppliersMatch = pathname.match(/^\/api\/trips\/([^/]+)\/suppliers$/);
+  if (tripSuppliersMatch && method === 'GET') {
+    sendJson(res, 200, await listTripSuppliers(tripSuppliersMatch[1]!));
+    return true;
+  }
+  if (pathname === '/api/trip-suppliers' && method === 'POST') {
+    const body = await readJsonBody(req);
+    sendJson(res, 201, await addSupplierToTrip(String(body.trip_id ?? ''), String(body.supplier_id ?? '')));
+    return true;
+  }
+  const tripSupplierMatch = pathname.match(/^\/api\/trip-suppliers\/([^/]+)$/);
+  if (tripSupplierMatch && method === 'DELETE') {
+    sendJson(res, 200, await softDeleteTripSupplier(tripSupplierMatch[1]!));
+    return true;
+  }
+  const tripSupplierPairMatch = pathname.match(/^\/api\/trips\/([^/]+)\/suppliers\/([^/]+)$/);
+  if (tripSupplierPairMatch && method === 'DELETE') {
+    sendJson(res, 200, await removeSupplierFromTrip(tripSupplierPairMatch[1]!, tripSupplierPairMatch[2]!));
+    return true;
+  }
+
   // --- Suppliers ---
   if (pathname === '/api/suppliers/sample-sheet' && method === 'GET') {
     res.writeHead(200, {
@@ -261,7 +320,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     return true;
   }
   if (pathname === '/api/suppliers' && method === 'GET') {
-    sendJson(res, 200, await listSuppliers());
+    sendJson(res, 200, await listSuppliers(parseSupplierFilters(url.searchParams)));
     return true;
   }
   if (pathname === '/api/suppliers' && method === 'POST') {
@@ -272,7 +331,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   }
   const supplierMatch = pathname.match(/^\/api\/suppliers\/([^/]+)$/);
   if (supplierMatch && method === 'PATCH') {
-    sendJson(res, 200, await updateSupplier(supplierMatch[1]!, await readJsonBody(req)));
+    const updated = await updateSupplier(supplierMatch[1]!, await readJsonBody(req));
+    sendJson(res, 200, await getSupplierWithVisitStatus(updated.id));
     return true;
   }
   if (supplierMatch && method === 'DELETE') {

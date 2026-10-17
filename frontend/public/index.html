@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TripTrack</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/vendor/leaflet.markercluster/MarkerCluster.css" />
+  <link rel="stylesheet" href="/vendor/leaflet.markercluster/MarkerCluster.Default.css" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -78,6 +80,11 @@
           <input name="visit_date" type="date" required />
           <input name="scheduled_time" type="time" />
           <input name="purpose" placeholder="Purpose" />
+          <label class="inline-check">
+            <input id="visit-show-all" type="checkbox" />
+            <span>Show all suppliers (including Skip)</span>
+            <span id="visit-hidden-note" class="muted"></span>
+          </label>
           <button type="submit">Add visit</button>
         </form>
         <div id="visit-list"></div>
@@ -97,6 +104,7 @@
         <input id="supplier-search" type="search" placeholder="Search name, product, contact…" />
         <select id="supplier-region"><option value="">All regions</option></select>
       </div>
+      <div id="supplier-filter-chips" class="filter-chips" role="group" aria-label="Supplier filters"></div>
       <form id="supplier-form" class="card form-grid hidden">
         <h2 id="supplier-form-title">New supplier</h2>
         <input type="hidden" name="id" />
@@ -144,9 +152,14 @@
         <h3>Supplier Map</h3>
         <select id="map-region"><option value="">All regions</option></select>
       </div>
+      <div id="map-filter-chips" class="filter-chips" role="group" aria-label="Map filters"></div>
       <p id="map-summary" class="muted"></p>
       <div id="supplier-map" class="supplier-map"></div>
       <div class="map-legend">
+        <span class="map-legend-item"><span class="supplier-pin pin-MUST"></span>Must</span>
+        <span class="map-legend-item"><span class="supplier-pin pin-MAYBE"></span>Maybe</span>
+        <span class="map-legend-item"><span class="supplier-pin pin-visited"></span>Visited</span>
+        <span class="map-legend-item"><span class="supplier-pin pin-SKIP"></span>Skip</span>
         <span class="map-legend-item"><span class="place-marker place-marker-airport">✈️</span>Airport</span>
         <span class="map-legend-item"><span class="place-marker place-marker-railway_station">🚆</span>Railway station</span>
         <span class="map-legend-item"><span class="place-marker place-marker-bus_station">🚌</span>Bus station</span>
@@ -277,6 +290,7 @@
   </main>
 
   <script src="/vendor/leaflet/leaflet.js"></script>
+  <script src="/vendor/leaflet.markercluster/leaflet.markercluster.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -150,7 +150,7 @@ export function parseXlsx(buffer: Buffer): string[][] {
 
 // ---------- Header mapping + import ----------
 
-const HEADER_ALIASES: Record<keyof Omit<CreateSupplierInput, 'city_id'>, string[]> = {
+const HEADER_ALIASES: Record<keyof Omit<CreateSupplierInput, 'city_id' | 'priority' | 'skip_reason'>, string[]> = {
   name: ['name', 'suppliername', 'supplier', 'company', 'companyname', 'factory', 'factoryname'],
   name_cn: ['namecn', 'cnname', 'chinesename', 'namechinese', 'suppliernamecn'],
   contact_name: ['contact', 'contactname', 'contactperson'],

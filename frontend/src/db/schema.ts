@@ -46,6 +46,15 @@ export interface SupplierRecord extends BaseRecord {
   gps_lat: number | null;
   gps_lng: number | null;
   notes: string | null;
+  priority: SupplierPriority;
+  skip_reason: string;
+}
+
+export type SupplierPriority = 'MUST' | 'MAYBE' | 'SKIP';
+
+export interface TripSupplierRecord extends BaseRecord {
+  trip_id: string;
+  supplier_id: string;
 }
 
 export type PlaceType = 'airport' | 'railway_station' | 'bus_station' | 'hotel';
@@ -166,6 +175,16 @@ export const SCHEMA_STATEMENTS = [
     gps_lat REAL,
     gps_lng REAL,
     notes TEXT,
+    priority TEXT DEFAULT 'MAYBE',
+    skip_reason TEXT DEFAULT '',
+    updated_at TEXT,
+    deleted INTEGER DEFAULT 0,
+    synced INTEGER DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS trip_suppliers (
+    id TEXT PRIMARY KEY,
+    trip_id TEXT NOT NULL,
+    supplier_id TEXT NOT NULL,
     updated_at TEXT,
     deleted INTEGER DEFAULT 0,
     synced INTEGER DEFAULT 0
@@ -266,12 +285,15 @@ export const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_visits_visit_date ON visits (visit_date)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_trip_id ON visits (trip_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_visits_supplier_id ON visits (supplier_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_trip_suppliers_trip_supplier ON trip_suppliers (trip_id, supplier_id)`,
   `CREATE INDEX IF NOT EXISTS idx_samples_visit_id ON samples (visit_id)`,
   `CREATE INDEX IF NOT EXISTS idx_photos_parent ON photos (parent_type, parent_id)`,
   `CREATE INDEX IF NOT EXISTS idx_trips_synced ON trips (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_cities_synced ON cities (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_suppliers_synced ON suppliers (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_places_synced ON places (synced)`,
+  `CREATE INDEX IF NOT EXISTS idx_trip_suppliers_synced ON trip_suppliers (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_synced ON visits (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_samples_synced ON samples (synced)`,
   `CREATE INDEX IF NOT EXISTS idx_photos_synced ON photos (synced)`,
@@ -293,5 +315,8 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; ddl: stri
   { table: 'suppliers', column: 'export_markets', ddl: 'ALTER TABLE suppliers ADD COLUMN export_markets TEXT' },
   { table: 'suppliers', column: 'gps_lat', ddl: 'ALTER TABLE suppliers ADD COLUMN gps_lat REAL' },
   { table: 'suppliers', column: 'gps_lng', ddl: 'ALTER TABLE suppliers ADD COLUMN gps_lng REAL' },
+  // SQLite fills an added column's DEFAULT into every existing row, so old suppliers become MAYBE.
+  { table: 'suppliers', column: 'priority', ddl: "ALTER TABLE suppliers ADD COLUMN priority TEXT DEFAULT 'MAYBE'" },
+  { table: 'suppliers', column: 'skip_reason', ddl: "ALTER TABLE suppliers ADD COLUMN skip_reason TEXT DEFAULT ''" },
   { table: 'users', column: 'password_hash', ddl: 'ALTER TABLE users ADD COLUMN password_hash TEXT' }
 ];

@@ -1,4 +1,45 @@
+// Supplier filters shared by the Suppliers and Map tabs. Must/Maybe pick which of those
+// priorities to show; Skip suppliers are governed by "Hide skipped" alone.
+const FILTER_STORAGE_KEY = 'triptrack.supplierFilters';
+const DEFAULT_FILTERS = { must: true, maybe: true, hideVisited: true, hideSkipped: true, shortlistOnly: false };
+const FILTER_CHIPS = [
+  { key: 'must', label: 'Must' },
+  { key: 'maybe', label: 'Maybe' },
+  { key: 'hideVisited', label: 'Hide visited' },
+  { key: 'hideSkipped', label: 'Hide skipped' },
+  { key: 'shortlistOnly', label: "Only this trip's shortlist" }
+];
+const PRIORITIES = [
+  ['MUST', 'Must'],
+  ['MAYBE', 'Maybe'],
+  ['SKIP', 'Skip']
+];
+
+function loadFilters() {
+  const filters = { ...DEFAULT_FILTERS };
+  try {
+    const saved = JSON.parse(localStorage.getItem(FILTER_STORAGE_KEY) || '{}');
+    for (const key of Object.keys(DEFAULT_FILTERS)) {
+      if (typeof saved[key] === 'boolean') filters[key] = saved[key];
+    }
+  } catch {
+    // Unreadable or blocked storage — fall back to the defaults.
+  }
+  return filters;
+}
+
+function saveFilters() {
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(state.filters));
+  } catch {
+    // Storage unavailable (private mode) — filters just won't persist.
+  }
+}
+
 const state = {
+  filters: loadFilters(),
+  shortlist: new Set(),
+  showAllVisitSuppliers: false,
   tripId: localStorage.getItem('triptrack.tripId') || null,
   tripName: localStorage.getItem('triptrack.tripName') || null,
   scheduleDate: null,
@@ -164,11 +205,13 @@ function selectTrip(trip) {
   localStorage.setItem('triptrack.tripName', trip.name);
   renderTrips();
   renderSchedule();
+  renderSuppliers().catch((error) => toast(error.message));
 }
 
 function clearSelectedTrip() {
   state.tripId = null;
   state.tripName = null;
+  state.shortlist = new Set();
   localStorage.removeItem('triptrack.tripId');
   localStorage.removeItem('triptrack.tripName');
 }
@@ -222,7 +265,9 @@ async function renderTrips() {
     const item = el('div', 'item trip-item' + (trip.id === state.tripId ? ' selected' : ''));
     const left = el('div');
     left.append(el('div', 'title', trip.name));
-    left.append(el('div', 'sub', [trip.start_date, trip.end_date].filter(Boolean).join(' → ') || 'No dates'));
+    const dates = [trip.start_date, trip.end_date].filter(Boolean).join(' → ') || 'No dates';
+    const shortlisted = trip.shortlist_count || 0;
+    left.append(el('div', 'sub', `${dates} · ${shortlisted} supplier${shortlisted === 1 ? '' : 's'} shortlisted`));
     item.append(left);
     const right = el('div', 'trip-actions');
     if (trip.id === state.tripId) right.append(el('span', 'status status-CONFIRMED', 'ACTIVE'));
@@ -368,12 +413,135 @@ function supplierMatchesQuery(supplier, query) {
   return haystack.includes(query);
 }
 
+function supplierPriority(supplier) {
+  return PRIORITIES.some(([value]) => value === supplier.priority) ? supplier.priority : 'MAYBE';
+}
+
+function supplierPassesFilters(supplier) {
+  const { filters } = state;
+  const priority = supplierPriority(supplier);
+  if (priority === 'MUST' && !filters.must) return false;
+  if (priority === 'MAYBE' && !filters.maybe) return false;
+  if (priority === 'SKIP' && filters.hideSkipped) return false;
+  if (filters.hideVisited && supplier.visited) return false;
+  // The shortlist chip is disabled (and ignored) until a trip is selected.
+  if (filters.shortlistOnly && state.tripId && !state.shortlist.has(supplier.id)) return false;
+  return true;
+}
+
+function renderFilterChips() {
+  for (const containerId of ['supplier-filter-chips', 'map-filter-chips']) {
+    const container = document.getElementById(containerId);
+    container.replaceChildren();
+    for (const chip of FILTER_CHIPS) {
+      const needsTrip = chip.key === 'shortlistOnly' && !state.tripId;
+      const on = state.filters[chip.key] && !needsTrip;
+      const button = el('button', 'chip' + (on ? ' on' : ''), chip.label);
+      button.type = 'button';
+      button.disabled = needsTrip;
+      button.title = needsTrip ? 'Select a trip on the Trips tab first' : '';
+      button.setAttribute('aria-pressed', String(on));
+      button.addEventListener('click', () => {
+        state.filters[chip.key] = !state.filters[chip.key];
+        saveFilters();
+        onFiltersChanged();
+      });
+      container.append(button);
+    }
+  }
+}
+
+function onFiltersChanged() {
+  renderFilterChips();
+  renderSupplierList();
+  if (supplierMap && !document.getElementById('view-map').classList.contains('hidden')) plotMap();
+}
+
+async function loadShortlist() {
+  const rows = state.tripId ? await api('GET', `/api/trips/${state.tripId}/suppliers`) : [];
+  state.shortlist = new Set(rows.map((row) => row.supplier_id));
+}
+
+async function saveSupplierFields(supplier, fields) {
+  try {
+    const updated = await api('PATCH', `/api/suppliers/${supplier.id}`, fields);
+    Object.assign(supplier, updated);
+    // A note edit commits on blur — re-rendering then would swallow whatever the user tapped next.
+    if (fields.priority) {
+      renderSupplierList();
+      renderVisitSupplierOptions();
+      if (!supplierPassesFilters(supplier)) toast(`${supplier.name} is now hidden by the current filters`);
+    }
+    refreshSyncStatus().catch(() => {});
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function toggleShortlist(supplier) {
+  if (!state.tripId) return;
+  try {
+    if (state.shortlist.has(supplier.id)) {
+      await api('DELETE', `/api/trips/${state.tripId}/suppliers/${supplier.id}`);
+      state.shortlist.delete(supplier.id);
+    } else {
+      await api('POST', '/api/trip-suppliers', { trip_id: state.tripId, supplier_id: supplier.id });
+      state.shortlist.add(supplier.id);
+    }
+    renderSupplierList();
+    renderVisitSupplierOptions();
+    refreshSyncStatus().catch(() => {});
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function supplierControls(supplier) {
+  const row = el('div', 'supplier-controls');
+
+  const current = supplierPriority(supplier);
+  const group = el('div', 'priority-toggle');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Priority');
+  for (const [value, label] of PRIORITIES) {
+    const button = el('button', `priority-option priority-${value}` + (current === value ? ' active' : ''), label);
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(current === value));
+    button.addEventListener('click', () => {
+      if (current !== value) saveSupplierFields(supplier, { priority: value });
+    });
+    group.append(button);
+  }
+
+  const onTrip = state.shortlist.has(supplier.id);
+  const tripButton = el('button', 'map-link shortlist-toggle' + (onTrip ? ' on' : ''), onTrip ? '✓ On trip' : '+ Add to trip');
+  tripButton.type = 'button';
+  tripButton.disabled = !state.tripId;
+  tripButton.title = state.tripId ? `${onTrip ? 'Remove from' : 'Add to'} ${state.tripName}` : 'Select a trip on the Trips tab first';
+  tripButton.setAttribute('aria-pressed', String(onTrip));
+  tripButton.addEventListener('click', () => toggleShortlist(supplier));
+
+  const note = el('input', 'supplier-note');
+  note.type = 'text';
+  note.maxLength = 200;
+  note.placeholder = 'Note (e.g. why skip)';
+  note.value = supplier.skip_reason || '';
+  note.addEventListener('change', () => saveSupplierFields(supplier, { skip_reason: note.value.trim() }));
+  note.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') note.blur();
+  });
+
+  row.append(group, tripButton, note);
+  return row;
+}
+
 function renderSupplierList() {
   const query = state.supplierQuery.trim().toLowerCase();
   const filtered = state.suppliers.filter(
     (supplier) =>
       (!state.supplierRegion || supplier.region === state.supplierRegion) &&
-      (!query || supplierMatchesQuery(supplier, query))
+      (!query || supplierMatchesQuery(supplier, query)) &&
+      supplierPassesFilters(supplier)
   );
 
   const count = document.getElementById('supplier-count');
@@ -385,13 +553,15 @@ function renderSupplierList() {
   const list = document.getElementById('supplier-list');
   list.replaceChildren();
   if (filtered.length === 0) {
-    list.append(el('p', 'muted', state.suppliers.length === 0 ? 'No suppliers yet — add one or import your Excel master.' : 'No suppliers match your search.'));
+    list.append(el('p', 'muted', state.suppliers.length === 0 ? 'No suppliers yet — add one or import your Excel master.' : 'No suppliers match your search and filters.'));
   }
   for (const supplier of filtered) {
-    const item = el('div', 'item supplier-item');
+    const item = el('div', 'item supplier-item' + (supplierPriority(supplier) === 'SKIP' ? ' is-skip' : ''));
     const header = el('div', 'supplier-header');
     const left = el('div');
-    left.append(el('div', 'title', supplier.name_cn ? `${supplier.name} · ${supplier.name_cn}` : supplier.name));
+    const title = el('div', 'title', supplier.name_cn ? `${supplier.name} · ${supplier.name_cn}` : supplier.name);
+    if (supplier.visited) title.append(' ', el('span', 'badge badge-visited', `Visited ${supplier.last_visit_date}`));
+    left.append(title);
     left.append(
       el('div', 'sub', [supplier.region, supplier.product_category, supplier.contact_name, supplier.contact_mobile]
         .filter(Boolean)
@@ -419,7 +589,7 @@ function renderSupplierList() {
     });
     actions.append(mapLink(supplier), editButton, deleteButton);
     header.append(left, actions);
-    item.append(header);
+    item.append(header, supplierControls(supplier));
 
     const profile = supplierProfile(supplier);
     profile.classList.add('hidden');
@@ -464,15 +634,53 @@ async function renderSuppliers() {
   regionSelect.value = regions.includes(current) ? current : '';
   state.supplierRegion = regionSelect.value;
 
+  await loadShortlist();
+  renderFilterChips();
   renderSupplierList();
+  renderVisitSupplierOptions();
+}
 
+const PRIORITY_RANK = { MUST: 0, MAYBE: 1, SKIP: 2 };
+
+function supplierOptionLabel(supplier) {
+  const tags = [];
+  const priority = supplierPriority(supplier);
+  if (priority === 'MUST') tags.push('★ Must');
+  if (priority === 'SKIP') tags.push('Skip');
+  if (supplier.visited) tags.push(`✓ Visited ${supplier.last_visit_date}`);
+  return tags.length ? `${supplier.name} — ${tags.join(' · ')}` : supplier.name;
+}
+
+// Visit form supplier picker: this trip's shortlist first, then everyone else (Must before
+// Maybe within each group). Skip suppliers stay out unless "Show all" is ticked.
+function renderVisitSupplierOptions() {
   const select = document.querySelector('#visit-form select[name="supplier_id"]');
+  const previous = select.value;
+  const showAll = state.showAllVisitSuppliers;
+  const candidates = state.suppliers
+    .filter((supplier) => showAll || supplierPriority(supplier) !== 'SKIP')
+    .sort((a, b) => PRIORITY_RANK[supplierPriority(a)] - PRIORITY_RANK[supplierPriority(b)]);
+  const shortlisted = candidates.filter((supplier) => state.shortlist.has(supplier.id));
+  const others = candidates.filter((supplier) => !state.shortlist.has(supplier.id));
+
+  const group = (label, suppliers) => {
+    const optgroup = el('optgroup');
+    optgroup.label = label;
+    for (const supplier of suppliers) {
+      const option = el('option', null, supplierOptionLabel(supplier));
+      option.value = supplier.id;
+      optgroup.append(option);
+    }
+    return optgroup;
+  };
   select.replaceChildren();
-  for (const supplier of state.suppliers) {
-    const option = el('option', null, supplier.name);
-    option.value = supplier.id;
-    select.append(option);
-  }
+  if (shortlisted.length > 0) select.append(group(`Trip shortlist (${shortlisted.length})`, shortlisted));
+  if (others.length > 0) select.append(group(shortlisted.length > 0 ? 'Other suppliers' : 'Suppliers', others));
+  if (candidates.some((supplier) => supplier.id === previous)) select.value = previous;
+
+  const hidden = state.suppliers.length - candidates.length;
+  document.getElementById('visit-hidden-note').textContent = !showAll && hidden > 0 ? `(${hidden} hidden)` : '';
+  document.getElementById('visit-show-all').checked = showAll;
 }
 
 // --- Map view ---
@@ -486,7 +694,8 @@ L.Icon.Default.mergeOptions({
 });
 
 let supplierMap = null;
-let supplierMapMarkers = null;
+let supplierCluster = null;
+let placeMarkers = null;
 
 // gps_lat/gps_lng (set by the coordinates helper on the form) win; records saved before that
 // existed, or imported with only a map link, fall back to parsing one out of it. Works for both
@@ -498,9 +707,26 @@ function entityLocation(entity) {
   return parseCoordinates(entity.map_url || '');
 }
 
+// Red = Must, orange = Maybe, grey = visited (whatever its priority); Skip pins only appear when
+// "Hide skipped" is off. supplierPriority() whitelists the value before it reaches the HTML.
+function supplierIcon(supplier) {
+  const pinClass = supplier.visited ? 'pin-visited' : `pin-${supplierPriority(supplier)}`;
+  return L.divIcon({
+    className: 'supplier-div-icon',
+    html: `<span class="supplier-pin ${pinClass}"></span>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 24],
+    popupAnchor: [0, -22]
+  });
+}
+
 function supplierPopup(supplier, loc) {
   const box = el('div');
   box.append(el('b', null, supplier.name_cn ? `${supplier.name} · ${supplier.name_cn}` : supplier.name));
+  const priorityLabel = PRIORITIES.find(([value]) => value === supplierPriority(supplier))[1];
+  box.append(
+    el('div', 'muted', [priorityLabel, supplier.visited && `Visited ${supplier.last_visit_date}`, supplier.skip_reason].filter(Boolean).join(' · '))
+  );
   const details = [supplier.region, supplier.contact_name, supplier.contact_mobile].filter(Boolean).join(' · ');
   if (details) box.append(el('div', 'muted', details));
   const linkRow = el('div');
@@ -548,7 +774,10 @@ async function renderMap() {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(supplierMap);
-    supplierMapMarkers = L.layerGroup().addTo(supplierMap);
+    // Nearby suppliers (e.g. the Hangzhou/Shaoxing cluster) merge into numbered bubbles that
+    // split apart as you zoom in. Places stay unclustered so airports/hotels are always visible.
+    supplierCluster = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 }).addTo(supplierMap);
+    placeMarkers = L.layerGroup().addTo(supplierMap);
   }
 
   state.places = await api('GET', '/api/places');
@@ -567,16 +796,26 @@ async function renderMap() {
   regionSelect.value = regions.includes(current) ? current : '';
   state.mapRegion = regionSelect.value;
 
-  const filtered = state.suppliers.filter((s) => !state.mapRegion || s.region === state.mapRegion);
+  renderFilterChips();
+  plotMap();
+}
 
-  supplierMapMarkers.clearLayers();
+function plotMap() {
+  const inRegion = state.suppliers.filter((s) => !state.mapRegion || s.region === state.mapRegion);
+  const filtered = inRegion.filter(supplierPassesFilters);
+  const hiddenByFilters = inRegion.length - filtered.length;
+
+  supplierCluster.clearLayers();
+  placeMarkers.clearLayers();
   const points = [];
+  const supplierMarkers = [];
   for (const supplier of filtered) {
     const loc = entityLocation(supplier);
     if (!loc) continue;
     points.push([loc.lat, loc.lng]);
-    L.marker([loc.lat, loc.lng]).bindPopup(supplierPopup(supplier, loc)).addTo(supplierMapMarkers);
+    supplierMarkers.push(L.marker([loc.lat, loc.lng], { icon: supplierIcon(supplier) }).bindPopup(supplierPopup(supplier, loc)));
   }
+  supplierCluster.addLayers(supplierMarkers);
   const suppliersPlotted = points.length;
 
   let placesPlotted = 0;
@@ -585,16 +824,22 @@ async function renderMap() {
     if (!loc) continue;
     placesPlotted += 1;
     points.push([loc.lat, loc.lng]);
-    L.marker([loc.lat, loc.lng], { icon: placeIcon(place.type) }).bindPopup(placePopup(place, loc)).addTo(supplierMapMarkers);
+    L.marker([loc.lat, loc.lng], { icon: placeIcon(place.type) }).bindPopup(placePopup(place, loc)).addTo(placeMarkers);
   }
 
   const missing = filtered.length - suppliersPlotted;
+  const placesText = placesPlotted > 0 ? ` · ${placesPlotted} place${placesPlotted === 1 ? '' : 's'}` : '';
+  const noMatch = filtered.length === 0 && inRegion.length > 0;
   const summary = document.getElementById('map-summary');
-  summary.textContent = points.length === 0
-    ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates, and hit "Build map link".'
-    : `${suppliersPlotted} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
-      (missing > 0 ? ` · ${missing} missing a location` : '') +
-      (placesPlotted > 0 ? ` · ${placesPlotted} place${placesPlotted === 1 ? '' : 's'}` : '');
+  summary.classList.toggle('no-match', noMatch);
+  summary.textContent = noMatch
+    ? `No suppliers match these filters — ${hiddenByFilters} hidden. Turn a filter off to see them.` + placesText
+    : points.length === 0
+      ? 'No suppliers with a location yet — open a supplier, paste GPS coordinates, and hit "Build map link".'
+      : `${suppliersPlotted} of ${filtered.length} supplier${filtered.length === 1 ? '' : 's'} plotted` +
+        (hiddenByFilters > 0 ? ` · ${hiddenByFilters} hidden by filters` : '') +
+        (missing > 0 ? ` · ${missing} missing a location` : '') +
+        placesText;
 
   // The container is display:none until this tab is opened, so Leaflet computed zero size
   // when the map was first created — invalidateSize() makes it re-measure now that it's visible.
@@ -893,6 +1138,7 @@ async function renderSchedule() {
   }
   empty.classList.add('hidden');
   body.classList.remove('hidden');
+  renderVisitSupplierOptions();
 
   if (!state.scheduleDate) {
     // Default the day picker to the trip's next visit day (or its last, for past trips).
@@ -931,6 +1177,8 @@ async function renderSchedule() {
       const button = el('button', null, status === 'CONFIRMED' ? 'Confirm' : status === 'DONE' ? 'Done' : 'Cancel');
       button.addEventListener('click', async () => {
         await api('POST', `/api/visits/${visit.id}/status`, { status });
+        // DONE/undone changes a supplier's visited badge and map pin.
+        await renderSuppliers();
         await renderSchedule();
         refreshSyncStatus().catch(() => {});
       });
@@ -1052,6 +1300,7 @@ function activateView(name) {
   if (location.hash !== `#${name}`) history.replaceState(null, '', `#${name}`);
   if (name === 'today') renderToday().catch((error) => toast(error.message));
   if (name === 'schedule') renderSchedule().catch((error) => toast(error.message));
+  if (name === 'trips') renderTrips().catch((error) => toast(error.message));
   if (name === 'admin') renderUsers().catch((error) => toast(error.message));
   if (name === 'map') renderMap().catch((error) => toast(error.message));
   if (name === 'live') renderLive();
@@ -1090,6 +1339,10 @@ function bindForm(id, path, extra, after) {
 document.getElementById('schedule-date').addEventListener('change', (event) => {
   state.scheduleDate = event.currentTarget.value;
   renderSchedule().catch(() => {});
+});
+document.getElementById('visit-show-all').addEventListener('change', (event) => {
+  state.showAllVisitSuppliers = event.currentTarget.checked;
+  renderVisitSupplierOptions();
 });
 document.getElementById('day-prev').addEventListener('click', () => shiftScheduleDate(-1));
 document.getElementById('day-next').addEventListener('click', () => shiftScheduleDate(1));
