@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initializeDatabase } from '../db/migrations.ts';
 import { setSetting } from '../repositories/settingsRepository.ts';
-import { BAIDU_AK_SETTING, bd09mcToGcj02, gcj02ToWgs84, geocodeLocation, parseLocationText, parseMapUrl, resolveMapLink, wgs84ToGcj02 } from './geocode.ts';
+import { createServer } from 'node:http';
+import { BAIDU_AK_SETTING, bd09mcToGcj02, fetchRedirect, gcj02ToWgs84, geocodeLocation, parseLocationText, parseMapUrl, resolveMapLink, wgs84ToGcj02 } from './geocode.ts';
 
 const WECHAT_TEXT = '江阴市永芳印刷有限公司(火车站路) 江阴市锡澄路辅路附近';
 
@@ -228,4 +229,41 @@ test('Baidu configuration errors come back as actionable messages', async () => 
     throw new Error('getaddrinfo ENOTFOUND');
   };
   await assert.rejects(geocodeLocation(WECHAT_TEXT, unreachable as never), /Could not reach Baidu Maps/);
+});
+
+test('fetchRedirect skips addresses that drop connections and reads the redirect from a live one', async () => {
+  // Like surl.amap.com seen from outside China: some published addresses never answer.
+  const target = 'https://wb.amap.com/?q=31.80362316949228%2C120.24947181344031%2C%E9%94%A1%E6%BE%84%E8%B7%AF1071%E5%8F%B7';
+  const server = createServer((_req, res) => {
+    res.writeHead(302, { location: target });
+    res.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const started = Date.now();
+    const res = await fetchRedirect(`http://short.example:${port}/2fsYh1aS69Go`, {
+      resolve: async () => [
+        { address: '192.0.2.1', family: 4 }, // TEST-NET-1: blackholed, never connects
+        { address: '127.0.0.1', family: 4 }
+      ],
+      attemptTimeoutMs: 300
+    });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('location'), target);
+    assert.ok(Date.now() - started < 3000, 'gave up on the dead address quickly');
+
+    // Every address dead → the error surfaces.
+    await assert.rejects(
+      fetchRedirect(`http://short.example:${port}/x`, { resolve: async () => [{ address: '192.0.2.1', family: 4 }], attemptTimeoutMs: 200 }),
+      /timed out connecting to 192\.0\.2\.1/
+    );
+  } finally {
+    server.close();
+  }
+  // The resolved link's q=lat,lng,label shape (the user's real link) parses to a converted point.
+  const parsed = parseMapUrl(new URL(target), 'https://surl.amap.com/2fsYh1aS69Go');
+  assert.equal(parsed!.name, '锡澄路1071号');
+  const back = wgs84ToGcj02(parsed!.lat, parsed!.lng);
+  assert.ok(Math.abs(back.lat - 31.80362316949228) < 2e-6 && Math.abs(back.lng - 120.24947181344031) < 2e-6);
 });

@@ -116,7 +116,8 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
   }
   try {
     const data = await readFile(filePath);
-    res.writeHead(200, { 'content-type': CONTENT_TYPES[extname(filePath)] ?? 'application/octet-stream' });
+    // no-cache = revalidate every load, so a deploy reaches open browsers without a hard refresh.
+    res.writeHead(200, { 'content-type': CONTENT_TYPES[extname(filePath)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });
     res.end(data);
   } catch {
     sendJson(res, 404, { error: 'Not found' });

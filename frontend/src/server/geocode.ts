@@ -1,3 +1,6 @@
+import { lookup } from 'node:dns/promises';
+import { request as httpRequest, type IncomingMessage } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { getSetting } from '../repositories/settingsRepository.ts';
 
 // Turns something pasted into a supplier/place form into exact GPS coordinates:
@@ -157,6 +160,63 @@ type RedirectFetch = (url: string, init: { redirect: 'manual'; signal: AbortSign
   headers: { get(name: string): string | null };
 }>;
 
+const BROWSER_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+
+/**
+ * Fetch one URL without following redirects, trying each of the host's addresses in turn
+ * (IPv4 first) with a short per-address timeout. surl.amap.com publishes 8 addresses, and from
+ * outside China several of them (all IPv6, plus some IPv4) silently drop connections — global
+ * fetch() commits to one address and times out, while curl moves on to the next. This does what
+ * curl does.
+ */
+export async function fetchRedirect(
+  url: string,
+  options: {
+    resolve?: (host: string) => Promise<Array<{ address: string; family: number }>>;
+    attemptTimeoutMs?: number;
+  } = {}
+): Promise<{ status: number; headers: { get(name: string): string | null } }> {
+  const target = new URL(url);
+  const resolve = options.resolve ?? ((host: string) => lookup(host, { all: true }));
+  const addresses = [...(await resolve(target.hostname))].sort((a, b) => a.family - b.family);
+  let lastError: unknown = new Error(`No addresses for ${target.hostname}`);
+  for (const { address, family } of addresses) {
+    try {
+      const res = await new Promise<IncomingMessage>((resolveRes, reject) => {
+        const req = (target.protocol === 'http:' ? httpRequest : httpsRequest)(
+          target,
+          {
+            headers: { 'user-agent': BROWSER_UA },
+            // Pin this attempt to one address; TLS SNI and Host still use the hostname.
+            lookup: (_host, opts, callback) =>
+              (opts as { all?: boolean }).all
+                ? (callback as unknown as (e: null, a: Array<{ address: string; family: number }>) => void)(null, [{ address, family }])
+                : callback(null, address, family),
+            timeout: options.attemptTimeoutMs ?? 3000
+          },
+          resolveRes
+        );
+        req.on('timeout', () => req.destroy(new Error(`timed out connecting to ${address}`)));
+        req.on('error', reject);
+        req.end();
+      });
+      res.resume();
+      return {
+        status: res.statusCode ?? 0,
+        headers: {
+          get: (name: string) => {
+            const value = res.headers[name.toLowerCase()];
+            return (Array.isArray(value) ? value[0] : value) ?? null;
+          }
+        }
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 function wgsCandidate(gcjLat: number, gcjLng: number, name: string, address: string, mapUrl: string): GeocodeCandidate {
   const wgs = gcj02ToWgs84(gcjLat, gcjLng);
   return { name, address, lat: wgs.lat, lng: wgs.lng, map_url: mapUrl, precision: 'place' };
@@ -220,7 +280,7 @@ export function parseMapUrl(url: URL, shareUrl: string): GeocodeCandidate | null
  * Resolve a map-app share link to exact coordinates without any API key, following short-link
  * redirects (Amap's surl.amap.com) by reading Location headers hop by hop.
  */
-export async function resolveMapLink(link: string, fetchImpl: RedirectFetch = fetch as unknown as RedirectFetch): Promise<GeocodeCandidate | null> {
+export async function resolveMapLink(link: string, fetchImpl: RedirectFetch = fetchRedirect as unknown as RedirectFetch): Promise<GeocodeCandidate | null> {
   let url: URL;
   try {
     url = new URL(link);
@@ -233,7 +293,7 @@ export async function resolveMapLink(link: string, fetchImpl: RedirectFetch = fe
       res = await fetchImpl(url.href, {
         redirect: 'manual',
         signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' }
+        headers: { 'user-agent': BROWSER_UA }
       });
     } catch {
       if (url.hostname === 'j.map.baidu.com') {
