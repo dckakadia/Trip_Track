@@ -57,8 +57,12 @@ const PLACE_TYPES = {
   hotel: { emoji: '🏨', label: 'Hotel' }
 };
 
+// Local calendar date (YYYY-MM-DD). toISOString() would give the UTC date, which is still
+// "yesterday" between midnight and 8am in China (UTC+8).
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
 async function api(method, path, body) {
