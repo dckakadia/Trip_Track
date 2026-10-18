@@ -396,6 +396,37 @@ function mapLink(supplier) {
   return link;
 }
 
+function supplierMapLinks(supplier) {
+  const loc = entityLocation(supplier);
+  const name = supplier.name_cn || supplier.name;
+  const query = supplier.address_cn || supplier.address_en || supplier.name_cn || supplier.name;
+  const isAmapUrl = /amap\.com|autonavi/i.test(supplier.map_url || '');
+  const isGoogleUrl = /google\.[a-z.]+\/maps|goo\.gl/i.test(supplier.map_url || '');
+  const googleHref = loc
+    ? `https://www.google.com/maps?q=${loc.lat},${loc.lng}`
+    : isGoogleUrl
+      ? supplier.map_url
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  const amapHref = isAmapUrl
+    ? supplier.map_url
+    : loc
+      ? `https://uri.amap.com/marker?position=${loc.lng},${loc.lat}&name=${encodeURIComponent(name)}&coordinate=wgs84&src=triptrack`
+      : `https://www.amap.com/search?query=${encodeURIComponent(query)}`;
+  const make = (label, href, title) => {
+    const link = el('a', 'map-link', label);
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.title = title;
+    link.addEventListener('click', (event) => event.stopPropagation());
+    return link;
+  };
+  return [
+    make('📍 Google', googleHref, loc ? 'Open exact location in Google Maps' : `Search Google Maps for “${query}”`),
+    make('🧭 Amap', amapHref, loc || isAmapUrl ? 'Open exact location in Amap' : `Search Amap for “${query}”`)
+  ];
+}
+
 function supplierMatchesQuery(supplier, query) {
   const haystack = [
     supplier.name,
@@ -587,7 +618,7 @@ function renderSupplierList() {
         toast(error.message);
       }
     });
-    actions.append(mapLink(supplier), editButton, deleteButton);
+    actions.append(...supplierMapLinks(supplier), editButton, deleteButton);
     header.append(left, actions);
     item.append(header, supplierControls(supplier));
 
